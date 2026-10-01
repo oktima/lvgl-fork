@@ -487,20 +487,21 @@ static void transform_argb8888(const uint8_t * src, int32_t src_w, int32_t src_h
             lv_color32_t px_hor = src_c32[x_next];
             lv_color32_t px_ver = *(const lv_color32_t *)((uint8_t *)src_c32 + y_next * src_stride);
 
+            /*The alpha weights sum to 0x100 to match the >> 8, so two opaque pixels stay opaque*/
             if(px_ver.alpha == 0) {
-                dest_c32[x].alpha = (dest_c32[x].alpha * (0xFF - ys_fract)) >> 8;
+                dest_c32[x].alpha = (dest_c32[x].alpha * (0x100 - ys_fract)) >> 8;
             }
             else if(!lv_color32_eq(dest_c32[x], px_ver)) {
-                if(dest_c32[x].alpha) dest_c32[x].alpha = ((px_ver.alpha * ys_fract) + (dest_c32[x].alpha * (0xFF - ys_fract))) >> 8;
+                if(dest_c32[x].alpha) dest_c32[x].alpha = ((px_ver.alpha * ys_fract) + (dest_c32[x].alpha * (0x100 - ys_fract))) >> 8;
                 px_ver.alpha = ys_fract;
                 dest_c32[x] = lv_color_mix32(px_ver, dest_c32[x]);
             }
 
             if(px_hor.alpha == 0) {
-                dest_c32[x].alpha = (dest_c32[x].alpha * (0xFF - xs_fract)) >> 8;
+                dest_c32[x].alpha = (dest_c32[x].alpha * (0x100 - xs_fract)) >> 8;
             }
             else if(!lv_color32_eq(dest_c32[x], px_hor)) {
-                if(dest_c32[x].alpha) dest_c32[x].alpha = ((px_hor.alpha * xs_fract) + (dest_c32[x].alpha * (0xFF - xs_fract))) >> 8;
+                if(dest_c32[x].alpha) dest_c32[x].alpha = ((px_hor.alpha * xs_fract) + (dest_c32[x].alpha * (0x100 - xs_fract))) >> 8;
                 px_hor.alpha = xs_fract;
                 dest_c32[x] = lv_color_mix32(px_hor, dest_c32[x]);
             }
@@ -603,21 +604,22 @@ static void transform_argb8888_premultiplied(const uint8_t * src, int32_t src_w,
             px_hor = unpremultiply(px_hor);
             px_ver = unpremultiply(px_ver);
 
+            /*The alpha weights sum to 0x100 to match the >> 8, so two opaque pixels stay opaque*/
             if(px_ver.alpha == 0) {
-                dest_c32[x].alpha = (dest_c32[x].alpha * (0xFF - ys_fract)) >> 8;
+                dest_c32[x].alpha = (dest_c32[x].alpha * (0x100 - ys_fract)) >> 8;
 
             }
             else if(!lv_color32_eq(dest_c32[x], px_ver)) {
-                if(dest_c32[x].alpha) dest_c32[x].alpha = ((px_ver.alpha * ys_fract) + (dest_c32[x].alpha * (0xFF - ys_fract))) >> 8;
+                if(dest_c32[x].alpha) dest_c32[x].alpha = ((px_ver.alpha * ys_fract) + (dest_c32[x].alpha * (0x100 - ys_fract))) >> 8;
                 px_ver.alpha = ys_fract;
                 dest_c32[x] = lv_color_mix32(px_ver, dest_c32[x]);
             }
 
             if(px_hor.alpha == 0) {
-                dest_c32[x].alpha = (dest_c32[x].alpha * (0xFF - xs_fract)) >> 8;
+                dest_c32[x].alpha = (dest_c32[x].alpha * (0x100 - xs_fract)) >> 8;
             }
             else if(!lv_color32_eq(dest_c32[x], px_hor)) {
-                if(dest_c32[x].alpha) dest_c32[x].alpha = ((px_hor.alpha * xs_fract) + (dest_c32[x].alpha * (0xFF - xs_fract))) >> 8;
+                if(dest_c32[x].alpha) dest_c32[x].alpha = ((px_hor.alpha * xs_fract) + (dest_c32[x].alpha * (0x100 - xs_fract))) >> 8;
                 px_hor.alpha = xs_fract;
                 dest_c32[x] = lv_color_mix32(px_hor, dest_c32[x]);
             }

@@ -169,6 +169,10 @@ static void _draw_nema_gfx_img(lv_draw_task_t * t, const lv_draw_image_dsc_t * d
         float x3 = x0          ;
         float y3 = y0 + tex_h;
 
+        /*Untransformed image position, as x0 and y0 are overwritten with the transformed vertex*/
+        float image_x = x0;
+        float image_y = y0;
+
         nema_matrix3x3_t m;
         nema_mat3x3_load_identity(m);
         nema_mat3x3_translate(m, -x0, -y0);
@@ -186,10 +190,43 @@ static void _draw_nema_gfx_img(lv_draw_task_t * t, const lv_draw_image_dsc_t * d
         nema_mat3x3_mul_vec(m, &x2, &y2);
         nema_mat3x3_mul_vec(m, &x3, &y3);
 
-        nema_blit_quad_fit(x0, y0,
-                           x1, y1,
-                           x2, y2,
-                           x3, y3);
+        if(dsc->rotation == 0 && dsc->scale_x > 0 && dsc->scale_y > 0) {
+            /*Scale only: fitting the whole scaled texture to its quad renders wrong once the quad exceeds
+             *about 2^23 square pixels, even if mostly clipped (e.g. the middle part of a stretched 9-slice),
+             *so blit only the visible part of the quad.*/
+
+            /*The visible part: the axis-aligned quad ((x0, y0) top-left, (x2, y2) bottom-right) clipped to
+             *the clip area. rel_clip_area comes from the transformed area that LVGL rounds down to whole pixels:
+             *on the left and top it can exceed the quad, where the default clamp wrap mode would repeat
+             *the edge texels; on the right and bottom it can drop the last pixel, as for every draw unit.
+             *Note: that last pixel (one column or row at most, when the edge's fraction is over 0.5) is lost
+             *by the software renderer too; fixing it means rounding up in lv_image_buf_get_transformed_area(),
+             *which all draw units and the image widget's invalidation share. Whether a one-pixel loss is worth
+             *changing such shared code is an open question*/
+            float quad_x1 = LV_MAX(x0, (float)rel_clip_area.x1);
+            float quad_y1 = LV_MAX(y0, (float)rel_clip_area.y1);
+            float quad_x2 = LV_MIN(x2, (float)(rel_clip_area.x2 + 1));
+            float quad_y2 = LV_MIN(y2, (float)(rel_clip_area.y2 + 1));
+
+            if(quad_x1 < quad_x2 && quad_y1 < quad_y2) {
+                /*Destination to texel: the inverse of the transform above (destination point to untransformed
+                 *point, then to texel), so the pixels drawn are the same.
+                 *The return value is ignored: with both scales > 0 the matrix is invertible*/
+                nema_mat3x3_invert(m);
+                nema_mat3x3_translate(m, -image_x, -image_y);
+
+                nema_blit_quad_m(quad_x1, quad_y1,
+                                 quad_x2, quad_y1,
+                                 quad_x2, quad_y2,
+                                 quad_x1, quad_y2, m);
+            }
+        }
+        else {
+            nema_blit_quad_fit(x0, y0,
+                               x1, y1,
+                               x2, y2,
+                               x3, y3);
+        }
     }
 
     nema_cl_submit(&(draw_nema_gfx_unit->cl));

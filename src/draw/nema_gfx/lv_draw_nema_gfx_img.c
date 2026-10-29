@@ -177,10 +177,13 @@ static void _draw_nema_gfx_img(lv_draw_task_t * t, const lv_draw_image_dsc_t * d
         nema_mat3x3_load_identity(m);
         nema_mat3x3_translate(m, -x0, -y0);
         nema_mat3x3_translate(m, -(float)dsc->pivot.x, -(float)dsc->pivot.y);
-        nema_mat3x3_rotate(m, (dsc->rotation / 10.0f)); /* angle is 1/10 degree */
+        /*Scale along the image's axes, then rotate, as the software renderer and lv_image_buf_get_transformed_area()
+         *do: the transforms apply in call order, so rotating first would scale along the screen's axes, and with
+         *different horizontal and vertical scales the image would be distorted and clipped to the transformed area*/
         float scale_x = 1.f * dsc->scale_x / LV_SCALE_NONE;
         float scale_y = 1.f * dsc->scale_y / LV_SCALE_NONE;
         nema_mat3x3_scale(m, (float)scale_x, (float)scale_y);
+        nema_mat3x3_rotate(m, (dsc->rotation / 10.0f)); /* angle is 1/10 degree */
         nema_mat3x3_translate(m, (float)dsc->pivot.x, (float)dsc->pivot.y);
         nema_mat3x3_translate(m, x0, y0);
 

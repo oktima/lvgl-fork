@@ -97,6 +97,17 @@ void lv_draw_nema_gfx_triangle(lv_draw_task_t * t, const lv_draw_triangle_dsc_t 
 void lv_draw_nema_gfx_img(lv_draw_task_t * t, const lv_draw_image_dsc_t * dsc,
                           const lv_area_t * coords);
 
+/**
+ * Set the ratio of the display's non-square pixels: the physical width of a pixel over its height
+ * (1, the default, for square pixels). Only rotated images are corrected: they are drawn narrowed by it
+ * along the screen's axes, after the rotation, so that the panel widening its pixels gives them their
+ * true shape at any angle. Unrotated images are drawn as they are: the caller has to provide rasters
+ * already narrowed for the display (e.g. resampled once when exporting them, which keeps them sharp and
+ * drawn with a plain copy), and to undo that narrowing with the image's scale when it rotates them.
+ * @param ratio     the physical width of a display pixel over its height
+ */
+void lv_draw_nema_gfx_set_non_square_pixel_ratio(float ratio);
+
 void lv_draw_nema_gfx_label(lv_draw_task_t * t, const lv_draw_label_dsc_t * dsc,
                             const lv_area_t * coords);
 

@@ -35,7 +35,6 @@
 #include "lv_draw_nema_gfx.h"
 
 #if LV_USE_NEMA_GFX
-#include <math.h>
 
 /**********************
  *   GLOBAL FUNCTIONS
@@ -52,16 +51,16 @@ void lv_draw_nema_gfx_border(lv_draw_task_t * t, const lv_draw_border_dsc_t * ds
     lv_draw_nema_gfx_unit_t * draw_nema_gfx_unit = (lv_draw_nema_gfx_unit_t *)t->draw_unit;
 
     lv_layer_t * layer = t->target_layer;
-    lv_area_t inward_coords;
     int32_t width = dsc->width;
 
-    /* Move border inwards to align with software rendered border */
-    inward_coords.x1 = coords->x1 + ceil(width / 2.0f);
-    inward_coords.x2 = coords->x2 - floor(width / 2.0f);
-    inward_coords.y1 = coords->y1 + ceil(width / 2.0f);
-    inward_coords.y2 = coords->y2 - floor(width / 2.0f);
-
-    lv_area_move(&inward_coords, -layer->buf_area.x1, -layer->buf_area.y1);
+    /*Clip check on the whole border area, outer edge included: like in the software renderer, the border
+     *covers coords from its outer edge inwards. The float coordinates computed below, moved inwards by half
+     *the width, are what nema_draw_rounded_rect_aa is given, not the extent of the border.
+     *A clip area that covers only the outer part of the border (e.g. a redrawn strip ending inside it)
+     *still has to draw that part*/
+    lv_area_t rel_coords;
+    lv_area_copy(&rel_coords, coords);
+    lv_area_move(&rel_coords, -layer->buf_area.x1, -layer->buf_area.y1);
 
     lv_area_t clip_area;
     lv_area_copy(&clip_area, &t->clip_area);
@@ -70,7 +69,7 @@ void lv_draw_nema_gfx_border(lv_draw_task_t * t, const lv_draw_border_dsc_t * ds
     nema_set_clip(clip_area.x1, clip_area.y1, lv_area_get_width(&clip_area), lv_area_get_height(&clip_area));
 
     lv_area_t clipped_coords;
-    if(!lv_area_intersect(&clipped_coords, &inward_coords, &clip_area))
+    if(!lv_area_intersect(&clipped_coords, &rel_coords, &clip_area))
         return; /*Fully clipped, nothing to do*/
 
     lv_color_format_t dst_cf = layer->draw_buf->header.cf;

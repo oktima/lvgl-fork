@@ -52,10 +52,11 @@ void lv_draw_nema_gfx_line(lv_draw_task_t * t, const lv_draw_line_dsc_t * dsc)
 
     lv_layer_t * layer = t->target_layer;
     lv_area_t clip_area;
-    clip_area.x1 = LV_MIN(dsc->p1.x, dsc->p2.x) - dsc->width / 2;
-    clip_area.x2 = LV_MAX(dsc->p1.x, dsc->p2.x) + dsc->width / 2;
-    clip_area.y1 = LV_MIN(dsc->p1.y, dsc->p2.y) - dsc->width / 2;
-    clip_area.y2 = LV_MAX(dsc->p1.y, dsc->p2.y) + dsc->width / 2;
+    /*The antialiased edge of the line reaches up to 1 px past its width*/
+    clip_area.x1 = LV_MIN(dsc->p1.x, dsc->p2.x) - dsc->width / 2 - 1;
+    clip_area.x2 = LV_MAX(dsc->p1.x, dsc->p2.x) + dsc->width / 2 + 1;
+    clip_area.y1 = LV_MIN(dsc->p1.y, dsc->p2.y) - dsc->width / 2 - 1;
+    clip_area.y2 = LV_MAX(dsc->p1.y, dsc->p2.y) + dsc->width / 2 + 1;
 
     if(!lv_area_intersect(&clip_area, &clip_area, &t->clip_area))
         return; /*Fully clipped, nothing to do*/

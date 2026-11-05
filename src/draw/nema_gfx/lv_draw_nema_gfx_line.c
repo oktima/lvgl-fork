@@ -89,7 +89,9 @@ void lv_draw_nema_gfx_line(lv_draw_task_t * t, const lv_draw_line_dsc_t * dsc)
         nema_set_blend_fill(NEMA_BL_SRC);
     }
 
-    nema_draw_line_aa(point1.x, point1.y, point2.x, point2.y, dsc->width, bg_color);
+    /*Odd widths centered on the middle of the pixel, as the software renderer draws them*/
+    float offset = (dsc->width & 1) ? 0.5f : 0.0f;
+    nema_draw_line_aa(point1.x + offset, point1.y + offset, point2.x + offset, point2.y + offset, dsc->width, bg_color);
 
     nema_cl_submit(&(draw_nema_gfx_unit->cl));
 

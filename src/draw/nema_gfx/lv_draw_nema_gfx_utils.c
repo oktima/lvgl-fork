@@ -140,4 +140,21 @@ bool lv_nemagfx_is_cf_supported(lv_color_format_t cf)
     return true;
 }
 
+bool lv_nemagfx_is_cf_opaque(lv_color_format_t cf)
+{
+    /*Not lv_color_format_has_alpha(): it counts the TSC formats with alpha (TSC6A, TSC6AP, TSC12A) as opaque.
+     *XRGB8888 is left out: the blit premultiplies it, so its X byte is read as alpha.
+     *The indexed formats are left out too: their opacity is in the palette*/
+    switch(cf) {
+        case LV_COLOR_FORMAT_RGB565:
+        case LV_COLOR_FORMAT_RGB888:
+        case LV_COLOR_FORMAT_NEMA_TSC4:
+        case LV_COLOR_FORMAT_NEMA_TSC6:
+        case LV_COLOR_FORMAT_NEMA_TSC12:
+            return true;
+        default:
+            return false;
+    }
+}
+
 #endif /*LV_USE_NEMA_GFX*/

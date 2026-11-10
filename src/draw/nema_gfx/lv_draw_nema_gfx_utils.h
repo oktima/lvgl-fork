@@ -145,6 +145,13 @@ uintptr_t NEMA_VIRT2PHYS(void * addr);
 bool lv_nemagfx_is_cf_supported(lv_color_format_t cf);
 
 /**
+ * Check if a `lv_color_format_t` has no alpha channel, so that every pixel is opaque.
+ * @param     cf  The LVGL color format
+ * @return        True/false
+ */
+bool lv_nemagfx_is_cf_opaque(lv_color_format_t cf);
+
+/**
  * Convert a `lv_color_format_t` to a Nema color format.
  * @param     cf  The LVGL color format
  * @return        The Nema color format

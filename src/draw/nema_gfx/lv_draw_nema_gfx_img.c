@@ -158,6 +158,14 @@ static void _draw_nema_gfx_img(lv_draw_task_t * t, const lv_draw_image_dsc_t * d
         }
     }
 
+    /*An opaque source drawn untransformed, at full opacity and with nothing to mix in, replaces the destination:
+     *copied, the destination is not read back. A transformed image is left blended: its edges are antialiased*/
+    bool copy = dsc->blend_mode == LV_BLEND_MODE_NORMAL && dsc->opa >= LV_OPA_COVER && !recolor && !masked &&
+                !has_transform && lv_nemagfx_is_cf_opaque(src_cf);
+    if(copy) {
+        blending_mode = NEMA_BL_SRC;
+    }
+
     nema_set_blend_blit(blending_mode);
 
     if(!has_transform) {

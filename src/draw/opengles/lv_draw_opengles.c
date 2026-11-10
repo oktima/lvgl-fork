@@ -198,6 +198,13 @@ static void opengles_texture_cache_free_cb(cache_data_t * cached_data, void * us
     LV_UNUSED(user_data);
     LV_PROFILER_DRAW_BEGIN;
 
+    /*Frees only what draw_to_texture() allocated. draw_dsc is NULL when the copy of the descriptor
+     *failed to allocate: then there is no texture either*/
+    if(cached_data->draw_dsc == NULL) {
+        LV_PROFILER_DRAW_END;
+        return;
+    }
+
     MY_LOG("Removing cached texture %d of size %d x %d for task type %s, obj %p, part %s",
            cached_data->texture, cached_data->w, cached_data->h,
            task_type_to_string(cached_data->task_type),
@@ -540,8 +547,12 @@ static unsigned int draw_to_texture(lv_draw_opengles_unit_t * u, cache_data_t * 
 
     int32_t texture_w = lv_area_get_width(&texture_area);
     int32_t texture_h = lv_area_get_height(&texture_area);
-    if (texture_w <= 0 || texture_h <= 0) {
-        // Nothing to draw
+    if(texture_w <= 0 || texture_h <= 0) {
+        /*Nothing to draw. Never reached when caching: draw_from_cached_texture() leaves before the cache
+         *on an empty area. Here cache_data->draw_dsc would still be the task's own descriptor, not a copy,
+         *and opengles_texture_cache_free_cb() would free it when the cache discards the entry*/
+        LV_ASSERT(cache_data == NULL);
+        LV_PROFILER_DRAW_END;
         return 0;
     }
 
@@ -908,6 +919,11 @@ static void draw_from_cached_texture(lv_draw_task_t * t)
     lv_area_t texture_area = get_texture_area(t);
     data_to_find.w = lv_area_get_width(&texture_area);
     data_to_find.h = lv_area_get_height(&texture_area);
+    if(data_to_find.w <= 0 || data_to_find.h <= 0) {
+        /*An empty area: nothing to draw, and nothing to cache*/
+        LV_PROFILER_DRAW_END;
+        return;
+    }
     data_to_find.slot.size = data_to_find.w * data_to_find.h * 4;
 
     /*user_data stores the renderer to differentiate it from SW rendered tasks.

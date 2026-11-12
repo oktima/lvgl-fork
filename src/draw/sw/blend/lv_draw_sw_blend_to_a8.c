@@ -239,7 +239,7 @@ void LV_ATTRIBUTE_FAST_MEM lv_draw_sw_blend_color_to_a8(lv_draw_sw_blend_fill_ds
             uint8_t * dest_buf = dsc->dest_buf;
             for(y = 0; y < h; y++) {
                 for(x = 0; x < w; x++) {
-                    lv_opa_t opa_res = LV_OPA_MIX2(mask[x], opa);
+                    lv_opa_t opa_res = lv_draw_sw_blend_mix_mask_opa(mask[x], opa);
                     BLEND_A8(dest_buf[x], opa_res);
                 }
                 dest_buf = drawbuf_next_row(dest_buf, dest_stride);

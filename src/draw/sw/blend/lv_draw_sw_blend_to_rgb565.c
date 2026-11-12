@@ -391,7 +391,8 @@ void LV_ATTRIBUTE_FAST_MEM lv_draw_sw_blend_color_to_rgb565(lv_draw_sw_blend_fil
         if(LV_RESULT_INVALID == LV_DRAW_SW_COLOR_BLEND_TO_RGB565_MIX_MASK_OPA(dsc)) {
             for(y = 0; y < h; y++) {
                 for(x = 0; x < w; x++) {
-                    dest_buf_u16[x] = lv_color_16_16_mix(color16, dest_buf_u16[x], LV_OPA_MIX2(mask[x], opa));
+                    lv_opa_t mix = lv_draw_sw_blend_mix_mask_opa(mask[x], opa);
+                    dest_buf_u16[x] = lv_color_16_16_mix(color16, dest_buf_u16[x], mix);
                 }
                 dest_buf_u16 = drawbuf_next_row(dest_buf_u16, dest_stride);
                 mask += mask_stride;

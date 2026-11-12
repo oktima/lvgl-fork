@@ -296,7 +296,7 @@ void LV_ATTRIBUTE_FAST_MEM lv_draw_sw_blend_color_to_al88(lv_draw_sw_blend_fill_
             lv_color16a_t * dest_buf = (lv_color16a_t *)dsc->dest_buf;
             for(y = 0; y < h; y++) {
                 for(x = 0; x < w; x++) {
-                    color16a.alpha = LV_OPA_MIX2(mask[x], opa);
+                    color16a.alpha = lv_draw_sw_blend_mix_mask_opa(mask[x], opa);
                     lv_color_16a_16a_mix(color16a, &dest_buf[x], &cache);
                 }
                 dest_buf = drawbuf_next_row(dest_buf, dest_stride);

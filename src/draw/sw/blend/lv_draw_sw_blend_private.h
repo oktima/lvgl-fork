@@ -79,6 +79,19 @@ struct _lv_draw_sw_blend_image_dsc_t {
  * GLOBAL PROTOTYPES
  **********************/
 
+/**
+ * Mix the opacity of a mask pixel with the opacity of a fill.
+ * Where the mask covers the pixel the opacity stays as it is: `LV_OPA_MIX2(LV_OPA_COVER, opa)` gives `opa - 1`,
+ * and inside a masked shape the fill would be blended with a lower opacity than the same fill without a mask.
+ * @param mask      the opacity of the mask pixel
+ * @param opa       the opacity of the fill
+ * @return          the opacity to blend the pixel with
+ */
+static inline lv_opa_t lv_draw_sw_blend_mix_mask_opa(lv_opa_t mask, lv_opa_t opa)
+{
+    return mask == LV_OPA_COVER ? opa : LV_OPA_MIX2(mask, opa);
+}
+
 /**********************
  *      MACROS
  **********************/

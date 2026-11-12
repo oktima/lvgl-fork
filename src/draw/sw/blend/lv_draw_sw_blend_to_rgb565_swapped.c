@@ -387,7 +387,7 @@ void LV_ATTRIBUTE_FAST_MEM lv_draw_sw_blend_color_to_rgb565_swapped(lv_draw_sw_b
                     uint16_t px = dest_buf_u16[x];
                     px = lv_color_swap_16(px); /* Swap destination */
 
-                    uint8_t mix_opa = LV_OPA_MIX2(mask[x], opa);
+                    uint8_t mix_opa = lv_draw_sw_blend_mix_mask_opa(mask[x], opa);
                     px = lv_color_16_16_mix(color16, px, mix_opa); /* Color mix */
 
                     dest_buf_u16[x] = lv_color_swap_16(px); /* Write back swapped */

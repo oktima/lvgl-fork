@@ -205,7 +205,7 @@ void LV_ATTRIBUTE_FAST_MEM lv_draw_sw_blend_color_to_argb8888_premultiplied(lv_d
         for(y = 0; y < h; y++) {
             for(x = 0; x < w; x++) {
                 lv_color32_t color_premul = color_argb;
-                lv_opa_t alpha = LV_OPA_MIX2(mask[x], opa);
+                lv_opa_t alpha = lv_draw_sw_blend_mix_mask_opa(mask[x], opa);
                 if(alpha >= LV_OPA_MAX) {
                     dest_buf[x] = lv_color_32_32_mix_premul(color_premul, dest_buf[x], &cache);
                 }

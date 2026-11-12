@@ -340,7 +340,8 @@ void LV_ATTRIBUTE_FAST_MEM lv_draw_sw_blend_color_to_rgb888(lv_draw_sw_blend_fil
             for(y = 0; y < h; y++) {
                 uint32_t mask_x;
                 for(x = 0, mask_x = 0; x < w; x += dest_px_size, mask_x++) {
-                    lv_color_24_24_mix((const uint8_t *) &color32, &dest_buf[x], LV_OPA_MIX2(opa, mask[mask_x]));
+                    lv_opa_t mix = lv_draw_sw_blend_mix_mask_opa(mask[mask_x], opa);
+                    lv_color_24_24_mix((const uint8_t *) &color32, &dest_buf[x], mix);
                 }
                 dest_buf += dest_stride;
                 mask += mask_stride;

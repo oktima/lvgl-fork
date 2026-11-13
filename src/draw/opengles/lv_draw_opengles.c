@@ -33,11 +33,19 @@
 #include "../../stdlib/lv_string.h"
 #include "../../misc/lv_area_private.h"
 
+#include <math.h>
+
 /*********************
  *      DEFINES
  *********************/
 
 #define DRAW_UNIT_ID_OPENGLES 6
+
+/*MEASUREMENT PROTOTYPE: the lines drawn by a shader on the GPU (draw_line_with_shader). 0 draws them as today, in
+ *software into a texture*/
+#ifndef LV_DRAW_OPENGLES_SHADER_LINES
+    #define LV_DRAW_OPENGLES_SHADER_LINES 1
+#endif
 
 #define USE_MY_LOG 0
 
@@ -106,6 +114,10 @@ static lv_cache_entry_t * acquire_or_create_cache_entry(lv_draw_opengles_unit_t 
 static void draw_from_cached_texture(lv_draw_task_t * t);
 
 static void execute_drawing(lv_draw_opengles_unit_t * u);
+
+#if LV_DRAW_OPENGLES_SHADER_LINES
+    static void deinit_line_shader(void);
+#endif
 
 static int32_t delete(lv_draw_unit_t * draw_unit);
 static int32_t dispatch(lv_draw_unit_t * draw_unit, lv_layer_t * layer);
@@ -376,6 +388,9 @@ static int32_t delete(lv_draw_unit_t * draw_unit)
         GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
         GL_CALL(glDeleteFramebuffers(1, &draw_opengles_unit->framebuffer));
     }
+#if LV_DRAW_OPENGLES_SHADER_LINES
+    deinit_line_shader();
+#endif
 
     if(draw_opengles_unit == g_unit) {
         g_unit = NULL;
@@ -993,6 +1008,388 @@ static void draw_from_cached_texture(lv_draw_task_t * t)
     LV_PROFILER_DRAW_END;
 }
 
+#if LV_DRAW_OPENGLES_SHADER_LINES
+/*MEASUREMENT PROTOTYPE: the lines without dashes and round caps drawn on the GPU, with an analytic anti-aliasing.
+ *Every segment is a quad around it, wider and longer than the line by the anti-aliasing margin, and the fragment shader
+ *computes the coverage of the pixel from its distance to the axis and from its position along the segment:
+ *the sides are anti-aliased; the ends of a run of segments are flat caps, anti-aliased as the sides; between two
+ *segments of a run there is a hard cut, so that a pixel on the boundary is blended once, not twice at half coverage.
+ *All the segments of a task go in one vertex buffer and one draw call, into the texture of the target layer.
+ *Odd widths are centered on the middle of the pixel, as the software renderer draws them*/
+
+/*The quad goes past the line by this much, for the pixels the anti-aliasing touches*/
+#define LINE_AA_MARGIN 1.0f
+/*A vertex: position in the layer (2), local coordinates (3: across the axis, along from the start, length of the
+ *segment), caps (2: start and end of a run, 1 anti-aliased, 0 hard cut)*/
+#define LINE_VERTEX_FLOATS 7
+#define LINE_VERTICES_PER_SEGMENT 6
+
+typedef struct {
+    float x1;
+    float y1;
+    float x2;
+    float y2;
+} line_segment_t;
+
+typedef struct {
+    unsigned int program;
+    int position_location;
+    int local_location;
+    int caps_location;
+    int size_location;
+    int color_location;
+    int half_width_location;
+    unsigned int vertex_array;
+    unsigned int vertex_buffer;
+    /*The segments of the current task, from lv_draw_line_iterate*/
+    line_segment_t * segments;
+    uint32_t segment_count;
+    uint32_t segment_capacity;
+    bool out_of_memory;
+    float * vertices;
+    uint32_t vertex_float_capacity;
+    /*The shader did not compile or link: the lines go the usual way*/
+    bool failed;
+} line_shader_t;
+
+static line_shader_t line_shader;
+
+static const char * line_vertex_shader_source =
+    "#version 100\n"
+    "attribute vec2 a_Position;\n"
+    "attribute vec3 a_Local;\n"
+    "attribute vec2 a_Caps;\n"
+    "uniform vec2 u_Size;\n"
+    "varying vec3 v_Local;\n"
+    "varying vec2 v_Caps;\n"
+    "void main()\n"
+    "{\n"
+    "    v_Local = a_Local;\n"
+    "    v_Caps = a_Caps;\n"
+    /*The top of the layer is the top of the texture, as the fills draw it*/
+    "    gl_Position = vec4(a_Position.x / u_Size.x * 2.0 - 1.0, 1.0 - a_Position.y / u_Size.y * 2.0, 0.0, 1.0);\n"
+    "}\n";
+
+static const char * line_fragment_shader_source =
+    "#version 100\n"
+    /*Along a long segment the local coordinates reach the width of the display: mediump would lose the pixel*/
+    "#ifdef GL_FRAGMENT_PRECISION_HIGH\n"
+    "precision highp float;\n"
+    "#else\n"
+    "precision mediump float;\n"
+    "#endif\n"
+    "uniform vec4 u_Color;\n"
+    "uniform float u_HalfWidth;\n"
+    "varying vec3 v_Local;\n"
+    "varying vec2 v_Caps;\n"
+    "void main()\n"
+    "{\n"
+    "    float across = clamp(u_HalfWidth + 0.5 - abs(v_Local.x), 0.0, 1.0);\n"
+    "    float from_start = v_Local.y;\n"
+    "    float to_end = v_Local.z - v_Local.y;\n"
+    /*The hard cut leans towards blending a pixel on the boundary twice rather than not at all*/
+    "    float start = v_Caps.x > 0.5 ? clamp(from_start + 0.5, 0.0, 1.0) : step(-0.01, from_start);\n"
+    "    float end = v_Caps.y > 0.5 ? clamp(to_end + 0.5, 0.0, 1.0) : step(-0.01, to_end);\n"
+    "    gl_FragColor = u_Color * (across * start * end);\n"
+    "}\n";
+
+static unsigned int compile_line_shader(GLenum type, const char * source)
+{
+    unsigned int shader;
+    GL_CALL(shader = glCreateShader(type));
+    GL_CALL(glShaderSource(shader, 1, &source, NULL));
+    GL_CALL(glCompileShader(shader));
+
+    int compiled = 0;
+    GL_CALL(glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled));
+    if(!compiled) {
+        char log[512];
+        GL_CALL(glGetShaderInfoLog(shader, sizeof(log), NULL, log));
+        LV_LOG_ERROR("Line shader: the compilation failed: %s", log);
+        GL_CALL(glDeleteShader(shader));
+        return 0;
+    }
+    return shader;
+}
+
+static unsigned int link_line_program(void)
+{
+    unsigned int vertex_shader = compile_line_shader(GL_VERTEX_SHADER, line_vertex_shader_source);
+    unsigned int fragment_shader = compile_line_shader(GL_FRAGMENT_SHADER, line_fragment_shader_source);
+    unsigned int program = 0;
+
+    if(vertex_shader != 0 && fragment_shader != 0) {
+        GL_CALL(program = glCreateProgram());
+        GL_CALL(glAttachShader(program, vertex_shader));
+        GL_CALL(glAttachShader(program, fragment_shader));
+        GL_CALL(glLinkProgram(program));
+
+        int linked = 0;
+        GL_CALL(glGetProgramiv(program, GL_LINK_STATUS, &linked));
+        if(!linked) {
+            char log[512];
+            GL_CALL(glGetProgramInfoLog(program, sizeof(log), NULL, log));
+            LV_LOG_ERROR("Line shader: the link failed: %s", log);
+            GL_CALL(glDeleteProgram(program));
+            program = 0;
+        }
+    }
+
+    /*Attached to a program, they go with it*/
+    if(vertex_shader != 0) {
+        GL_CALL(glDeleteShader(vertex_shader));
+    }
+    if(fragment_shader != 0) {
+        GL_CALL(glDeleteShader(fragment_shader));
+    }
+    return program;
+}
+
+/*The program and the buffers, the first time a line is drawn. False when the shader is not available*/
+static bool init_line_shader(void)
+{
+    if(line_shader.program != 0) return true;
+    if(line_shader.failed) return false;
+
+    unsigned int program = link_line_program();
+    if(program == 0) {
+        line_shader.failed = true;
+        LV_LOG_WARN("Line shader: not available, the lines are drawn in software");
+        return false;
+    }
+
+    GL_CALL(line_shader.position_location = glGetAttribLocation(program, "a_Position"));
+    GL_CALL(line_shader.local_location = glGetAttribLocation(program, "a_Local"));
+    GL_CALL(line_shader.caps_location = glGetAttribLocation(program, "a_Caps"));
+    GL_CALL(line_shader.size_location = glGetUniformLocation(program, "u_Size"));
+    GL_CALL(line_shader.color_location = glGetUniformLocation(program, "u_Color"));
+    GL_CALL(line_shader.half_width_location = glGetUniformLocation(program, "u_HalfWidth"));
+    if(line_shader.position_location < 0 || line_shader.local_location < 0 || line_shader.caps_location < 0) {
+        GL_CALL(glDeleteProgram(program));
+        line_shader.failed = true;
+        LV_LOG_WARN("Line shader: attributes not found, the lines are drawn in software");
+        return false;
+    }
+    line_shader.program = program;
+
+    /*The attributes in a vertex array of the shader: the one of the driver keeps its own*/
+    GL_CALL(glGenBuffers(1, &line_shader.vertex_buffer));
+    GL_CALL(glGenVertexArrays(1, &line_shader.vertex_array));
+    GL_CALL(glBindVertexArray(line_shader.vertex_array));
+    GL_CALL(glBindBuffer(GL_ARRAY_BUFFER, line_shader.vertex_buffer));
+    int stride = LINE_VERTEX_FLOATS * (int)sizeof(float);
+    GL_CALL(glEnableVertexAttribArray(line_shader.position_location));
+    GL_CALL(glVertexAttribPointer(line_shader.position_location, 2, GL_FLOAT, GL_FALSE, stride, (const void *)0));
+    GL_CALL(glEnableVertexAttribArray(line_shader.local_location));
+    GL_CALL(glVertexAttribPointer(line_shader.local_location, 3, GL_FLOAT, GL_FALSE, stride,
+                                  (const void *)(2 * sizeof(float))));
+    GL_CALL(glEnableVertexAttribArray(line_shader.caps_location));
+    GL_CALL(glVertexAttribPointer(line_shader.caps_location, 2, GL_FLOAT, GL_FALSE, stride,
+                                  (const void *)(5 * sizeof(float))));
+    GL_CALL(glBindVertexArray(0));
+    GL_CALL(glBindBuffer(GL_ARRAY_BUFFER, 0));
+
+    /*A warning, so that the measurement shows it at the default level: the build took the prototype and the shader
+     *compiled on this GPU*/
+    LV_LOG_WARN("Line shader: active, the lines without dashes and round caps are drawn on the GPU");
+    return true;
+}
+
+static void deinit_line_shader(void)
+{
+    if(line_shader.program != 0) {
+        GL_CALL(glDeleteProgram(line_shader.program));
+    }
+    if(line_shader.vertex_buffer != 0) {
+        GL_CALL(glDeleteBuffers(1, &line_shader.vertex_buffer));
+    }
+    if(line_shader.vertex_array != 0) {
+        GL_CALL(glDeleteVertexArrays(1, &line_shader.vertex_array));
+    }
+    lv_free(line_shader.segments);
+    lv_free(line_shader.vertices);
+    lv_memzero(&line_shader, sizeof(line_shader));
+}
+
+/*Called by lv_draw_line_iterate for each segment of the task, gaps already left out*/
+static void collect_line_segment(lv_draw_task_t * t, const lv_draw_line_dsc_t * dsc)
+{
+    LV_UNUSED(t);
+    if(line_shader.out_of_memory) return;
+
+    if(line_shader.segment_count == line_shader.segment_capacity) {
+        uint32_t capacity = line_shader.segment_capacity == 0 ? 64 : line_shader.segment_capacity * 2;
+        line_segment_t * segments = lv_realloc(line_shader.segments, capacity * sizeof(line_segment_t));
+        if(segments == NULL) {
+            line_shader.out_of_memory = true;
+            return;
+        }
+        line_shader.segments = segments;
+        line_shader.segment_capacity = capacity;
+    }
+
+    line_segment_t * segment = &line_shader.segments[line_shader.segment_count++];
+    segment->x1 = (float)dsc->p1.x;
+    segment->y1 = (float)dsc->p1.y;
+    segment->x2 = (float)dsc->p2.x;
+    segment->y2 = (float)dsc->p2.y;
+}
+
+static bool are_segments_joined(const line_segment_t * before, const line_segment_t * after)
+{
+    return before->x2 == after->x1 && before->y2 == after->y1;
+}
+
+/*The two triangles of the quad of a segment, in the coordinates of the layer. Returns the next free float*/
+static float * add_segment_vertices(float * vertices, const line_segment_t * segment, float layer_x, float layer_y,
+                                    float offset, float half_width, bool start_cap, bool end_cap)
+{
+    float x1 = segment->x1 - layer_x + offset;
+    float y1 = segment->y1 - layer_y + offset;
+    float dx = segment->x2 - segment->x1;
+    float dy = segment->y2 - segment->y1;
+    float length = sqrtf(dx * dx + dy * dy);
+    float along_x = dx / length;
+    float along_y = dy / length;
+    float across_x = -along_y;
+    float across_y = along_x;
+    float across = half_width + LINE_AA_MARGIN;
+
+    /*The corners, as (along, across)*/
+    const float corners[4][2] = {
+        {-LINE_AA_MARGIN, -across},
+        {length + LINE_AA_MARGIN, -across},
+        {length + LINE_AA_MARGIN, across},
+        {-LINE_AA_MARGIN, across},
+    };
+    static const uint8_t order[LINE_VERTICES_PER_SEGMENT] = {0, 1, 2, 2, 3, 0};
+
+    uint32_t i;
+    for(i = 0; i < LINE_VERTICES_PER_SEGMENT; i++) {
+        float a = corners[order[i]][0];
+        float c = corners[order[i]][1];
+        *vertices++ = x1 + along_x * a + across_x * c;
+        *vertices++ = y1 + along_y * a + across_y * c;
+        *vertices++ = c;
+        *vertices++ = a;
+        *vertices++ = length;
+        *vertices++ = start_cap ? 1.0f : 0.0f;
+        *vertices++ = end_cap ? 1.0f : 0.0f;
+    }
+    return vertices;
+}
+
+/*The vertices of all the segments collected, with the caps at the ends of each run. Returns the count of the vertices,
+ *0 also when the memory is not enough*/
+static uint32_t make_line_vertices(const lv_layer_t * layer, const lv_draw_line_dsc_t * dsc)
+{
+    uint32_t count = line_shader.segment_count;
+    uint32_t float_count = count * LINE_VERTICES_PER_SEGMENT * LINE_VERTEX_FLOATS;
+    if(float_count > line_shader.vertex_float_capacity) {
+        float * vertices = lv_realloc(line_shader.vertices, float_count * sizeof(float));
+        if(vertices == NULL) {
+            line_shader.out_of_memory = true;
+            return 0;
+        }
+        line_shader.vertices = vertices;
+        line_shader.vertex_float_capacity = float_count;
+    }
+
+    float offset = (dsc->width & 1) ? 0.5f : 0.0f;
+    float half_width = (float)dsc->width / 2.0f;
+    float layer_x = (float)layer->buf_area.x1;
+    float layer_y = (float)layer->buf_area.y1;
+    const line_segment_t * segments = line_shader.segments;
+
+    float * end = line_shader.vertices;
+    uint32_t i;
+    for(i = 0; i < count; i++) {
+        if(segments[i].x1 == segments[i].x2 && segments[i].y1 == segments[i].y2) continue;
+
+        bool start_cap = i == 0 || !are_segments_joined(&segments[i - 1], &segments[i]);
+        bool end_cap = i + 1 == count || !are_segments_joined(&segments[i], &segments[i + 1]);
+        end = add_segment_vertices(end, &segments[i], layer_x, layer_y, offset, half_width, start_cap, end_cap);
+    }
+    return (uint32_t)(end - line_shader.vertices) / LINE_VERTEX_FLOATS;
+}
+
+/*Draws the line task with the shader, into the texture of the target layer. False when the shader does not draw this
+ *line, which then goes the usual way: dashes, round caps, the shader not available, not enough memory*/
+static bool draw_line_with_shader(lv_draw_opengles_unit_t * u)
+{
+    lv_draw_task_t * t = u->task_act;
+    lv_draw_line_dsc_t * dsc = t->draw_dsc;
+
+    if(dsc->dash_width != 0 && dsc->dash_gap != 0) return false;
+    if(dsc->round_start || dsc->round_end) return false;
+    if(dsc->width <= 0 || dsc->opa <= LV_OPA_MIN) return true;
+    if(!init_line_shader()) return false;
+
+    lv_layer_t * layer = t->target_layer;
+    lv_area_t clip_area;
+    if(!lv_area_intersect(&clip_area, &t->clip_area, &layer->buf_area)) return true;
+
+    LV_PROFILER_DRAW_BEGIN;
+    line_shader.segment_count = 0;
+    line_shader.out_of_memory = false;
+    lv_draw_line_iterate(t, dsc, collect_line_segment);
+    uint32_t vertex_count = line_shader.out_of_memory ? 0 : make_line_vertices(layer, dsc);
+    if(line_shader.out_of_memory) {
+        LV_PROFILER_DRAW_END;
+        return false;
+    }
+    if(vertex_count == 0) {
+        LV_PROFILER_DRAW_END;
+        return true;
+    }
+
+    unsigned int target_texture = layer_get_texture(layer);
+    int32_t targ_tex_w = lv_area_get_width(&layer->buf_area);
+    int32_t targ_tex_h = lv_area_get_height(&layer->buf_area);
+    if(target_texture) {
+        unsigned int framebuffer = get_framebuffer(u);
+        GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, framebuffer));
+        GL_CALL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, target_texture, 0));
+    }
+    lv_opengles_viewport(0, 0, targ_tex_w, targ_tex_h);
+
+    /*The clip area in the layer, with the rows of the texture from the bottom, as the fills set the scissor*/
+    lv_area_move(&clip_area, -layer->buf_area.x1, -layer->buf_area.y1);
+    int32_t clip_w = lv_area_get_width(&clip_area);
+    int32_t clip_h = lv_area_get_height(&clip_area);
+    GL_CALL(glEnable(GL_SCISSOR_TEST));
+    GL_CALL(glScissor(clip_area.x1, targ_tex_h - clip_area.y1 - clip_h, clip_w, clip_h));
+
+    /*Premultiplied, as the textures of the layers*/
+    GL_CALL(glEnable(GL_BLEND));
+    GL_CALL(glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA));
+
+    GL_CALL(glUseProgram(line_shader.program));
+    GL_CALL(glUniform2f(line_shader.size_location, (float)targ_tex_w, (float)targ_tex_h));
+    float opa = (float)dsc->opa / 255.0f;
+    /*Red and blue swapped, as in the textures of the layers*/
+    GL_CALL(glUniform4f(line_shader.color_location, (float)dsc->color.blue / 255.0f * opa,
+                        (float)dsc->color.green / 255.0f * opa, (float)dsc->color.red / 255.0f * opa, opa));
+    GL_CALL(glUniform1f(line_shader.half_width_location, (float)dsc->width / 2.0f));
+
+    GL_CALL(glBindVertexArray(line_shader.vertex_array));
+    GL_CALL(glBindBuffer(GL_ARRAY_BUFFER, line_shader.vertex_buffer));
+    GL_CALL(glBufferData(GL_ARRAY_BUFFER, vertex_count * LINE_VERTEX_FLOATS * sizeof(float), line_shader.vertices,
+                         GL_STREAM_DRAW));
+    GL_CALL(glDrawArrays(GL_TRIANGLES, 0, (int)vertex_count));
+
+    GL_CALL(glBindVertexArray(0));
+    GL_CALL(glBindBuffer(GL_ARRAY_BUFFER, 0));
+    GL_CALL(glDisable(GL_BLEND));
+    GL_CALL(glDisable(GL_SCISSOR_TEST));
+    if(target_texture) {
+        GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
+    }
+    LV_PROFILER_DRAW_END;
+    return true;
+}
+#endif /*LV_DRAW_OPENGLES_SHADER_LINES*/
+
 static void execute_drawing(lv_draw_opengles_unit_t * u)
 {
     lv_draw_task_t * t = u->task_act;
@@ -1058,6 +1455,11 @@ static void execute_drawing(lv_draw_opengles_unit_t * u)
                 break;
             }
         case LV_DRAW_TASK_TYPE_LINE: {
+#if LV_DRAW_OPENGLES_SHADER_LINES
+                if(draw_line_with_shader(u)) {
+                    return;
+                }
+#endif
                 /*Do not cache lines rendered from points as dsc->points will be freed*/
                 lv_draw_line_dsc_t * line_dsc = t->draw_dsc;
                 if(line_dsc->points) {

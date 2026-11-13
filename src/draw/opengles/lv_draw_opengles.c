@@ -1015,7 +1015,8 @@ static void draw_from_cached_texture(lv_draw_task_t * t)
  *the sides are anti-aliased; the ends of a run of segments are flat caps, anti-aliased as the sides; between two
  *segments of a run there is a hard cut, so that a pixel on the boundary is blended once, not twice at half coverage.
  *All the segments of a task go in one vertex buffer and one draw call, into the texture of the target layer.
- *Odd widths are centered on the middle of the pixel, as the software renderer draws them*/
+ *Odd widths are centered on the middle of the pixel across the line, as the software renderer draws them, while the
+ *ends stay on the points: a line along a row or a column covers the pixels from p1 to p2 excluded, as there*/
 
 /*The quad goes past the line by this much, for the pixels the anti-aliasing touches*/
 #define LINE_AA_MARGIN 1.0f
@@ -1023,13 +1024,8 @@ static void draw_from_cached_texture(lv_draw_task_t * t)
  *segment), caps (2: start and end of a run, 1 anti-aliased, 0 hard cut)*/
 #define LINE_VERTEX_FLOATS 7
 #define LINE_VERTICES_PER_SEGMENT 6
-
-typedef struct {
-    float x1;
-    float y1;
-    float x2;
-    float y2;
-} line_segment_t;
+/*The vertices the buffer starts with, doubled when a task needs more*/
+#define LINE_INITIAL_VERTEX_CAPACITY 1024
 
 typedef struct {
     unsigned int program;
@@ -1041,13 +1037,9 @@ typedef struct {
     int half_width_location;
     unsigned int vertex_array;
     unsigned int vertex_buffer;
-    /*The segments of the current task, from lv_draw_line_iterate*/
-    line_segment_t * segments;
-    uint32_t segment_count;
-    uint32_t segment_capacity;
-    bool out_of_memory;
+    /*The vertices of the current task, kept from one task to the next: they grow only when a task needs more*/
     float * vertices;
-    uint32_t vertex_float_capacity;
+    uint32_t vertex_capacity;
     /*The shader did not compile or link: the lines go the usual way*/
     bool failed;
 } line_shader_t;
@@ -1206,54 +1198,52 @@ static void deinit_line_shader(void)
     if(line_shader.vertex_array != 0) {
         GL_CALL(glDeleteVertexArrays(1, &line_shader.vertex_array));
     }
-    lv_free(line_shader.segments);
     lv_free(line_shader.vertices);
     lv_memzero(&line_shader, sizeof(line_shader));
 }
 
-/*Called by lv_draw_line_iterate for each segment of the task, gaps already left out*/
-static void collect_line_segment(lv_draw_task_t * t, const lv_draw_line_dsc_t * dsc)
+/*Room for count vertices, doubling the buffer: after the first frames no task grows it. False without memory*/
+static bool reserve_line_vertices(uint32_t count)
 {
-    LV_UNUSED(t);
-    if(line_shader.out_of_memory) return;
+    if(count <= line_shader.vertex_capacity) return true;
 
-    if(line_shader.segment_count == line_shader.segment_capacity) {
-        uint32_t capacity = line_shader.segment_capacity == 0 ? 64 : line_shader.segment_capacity * 2;
-        line_segment_t * segments = lv_realloc(line_shader.segments, capacity * sizeof(line_segment_t));
-        if(segments == NULL) {
-            line_shader.out_of_memory = true;
-            return;
-        }
-        line_shader.segments = segments;
-        line_shader.segment_capacity = capacity;
+    uint32_t capacity = line_shader.vertex_capacity == 0 ? LINE_INITIAL_VERTEX_CAPACITY : line_shader.vertex_capacity;
+    while(capacity < count) {
+        capacity *= 2;
     }
+    float * vertices = lv_realloc(line_shader.vertices, (size_t)capacity * LINE_VERTEX_FLOATS * sizeof(float));
+    if(vertices == NULL) return false;
 
-    line_segment_t * segment = &line_shader.segments[line_shader.segment_count++];
-    segment->x1 = (float)dsc->p1.x;
-    segment->y1 = (float)dsc->p1.y;
-    segment->x2 = (float)dsc->p2.x;
-    segment->y2 = (float)dsc->p2.y;
+    line_shader.vertices = vertices;
+    line_shader.vertex_capacity = capacity;
+    return true;
 }
 
-static bool are_segments_joined(const line_segment_t * before, const line_segment_t * after)
+/*As lv_draw_line_iterate tells a gap*/
+static bool is_line_point_missing(const lv_point_precise_t * point)
 {
-    return before->x2 == after->x1 && before->y2 == after->y1;
+    return point->x == LV_DRAW_LINE_POINT_NONE || point->y == LV_DRAW_LINE_POINT_NONE;
 }
 
-/*The two triangles of the quad of a segment, in the coordinates of the layer. Returns the next free float*/
-static float * add_segment_vertices(float * vertices, const line_segment_t * segment, float layer_x, float layer_y,
-                                    float offset, float half_width, bool start_cap, bool end_cap)
+/*The two triangles of the quad of a segment, from p1 to p2 in the coordinates of the layer. Returns the next free
+ *float*/
+static float * add_segment_vertices(float * vertices, float x1, float y1, float x2, float y2, float offset,
+                                    float half_width, bool start_cap, bool end_cap)
 {
-    float x1 = segment->x1 - layer_x + offset;
-    float y1 = segment->y1 - layer_y + offset;
-    float dx = segment->x2 - segment->x1;
-    float dy = segment->y2 - segment->y1;
+    float dx = x2 - x1;
+    float dy = y2 - y1;
     float length = sqrtf(dx * dx + dy * dy);
     float along_x = dx / length;
     float along_y = dy / length;
     float across_x = -along_y;
     float across_y = along_x;
     float across = half_width + LINE_AA_MARGIN;
+
+    /*The half pixel of the odd widths, (offset, offset) projected across the line: the line moves to the middle of
+     *the pixel, the ends stay on the points*/
+    float shift = offset * (across_x + across_y);
+    x1 += shift * across_x;
+    y1 += shift * across_y;
 
     /*The corners, as (along, across)*/
     const float corners[4][2] = {
@@ -1279,38 +1269,46 @@ static float * add_segment_vertices(float * vertices, const line_segment_t * seg
     return vertices;
 }
 
-/*The vertices of all the segments collected, with the caps at the ends of each run. Returns the count of the vertices,
- *0 also when the memory is not enough*/
-static uint32_t make_line_vertices(const lv_layer_t * layer, const lv_draw_line_dsc_t * dsc)
+/*The vertices of the segments of the line, in one pass over its points, as lv_draw_line_iterate takes them: a
+ *segment touching a missing point is a gap. A segment starts a run after the first point or a gap, and ends one
+ *before the last point or a gap; a segment of no length is left out, and the ones around it stay joined through it.
+ *False when the memory is not enough*/
+static bool make_line_vertices(const lv_layer_t * layer, const lv_draw_line_dsc_t * dsc, uint32_t * vertex_count)
 {
-    uint32_t count = line_shader.segment_count;
-    uint32_t float_count = count * LINE_VERTICES_PER_SEGMENT * LINE_VERTEX_FLOATS;
-    if(float_count > line_shader.vertex_float_capacity) {
-        float * vertices = lv_realloc(line_shader.vertices, float_count * sizeof(float));
-        if(vertices == NULL) {
-            line_shader.out_of_memory = true;
-            return 0;
-        }
-        line_shader.vertices = vertices;
-        line_shader.vertex_float_capacity = float_count;
+    lv_point_precise_t two_points[2];
+    const lv_point_precise_t * points = dsc->points;
+    int32_t point_count = dsc->point_cnt;
+    if(points == NULL) {
+        two_points[0] = dsc->p1;
+        two_points[1] = dsc->p2;
+        points = two_points;
+        point_count = 2;
     }
+
+    *vertex_count = 0;
+    if(point_count < 2) return true;
+    if(!reserve_line_vertices((uint32_t)(point_count - 1) * LINE_VERTICES_PER_SEGMENT)) return false;
 
     float offset = (dsc->width & 1) ? 0.5f : 0.0f;
     float half_width = (float)dsc->width / 2.0f;
     float layer_x = (float)layer->buf_area.x1;
     float layer_y = (float)layer->buf_area.y1;
-    const line_segment_t * segments = line_shader.segments;
 
     float * end = line_shader.vertices;
-    uint32_t i;
-    for(i = 0; i < count; i++) {
-        if(segments[i].x1 == segments[i].x2 && segments[i].y1 == segments[i].y2) continue;
+    int32_t i;
+    for(i = 0; i + 1 < point_count; i++) {
+        const lv_point_precise_t * p1 = &points[i];
+        const lv_point_precise_t * p2 = &points[i + 1];
+        if(is_line_point_missing(p1) || is_line_point_missing(p2)) continue;
+        if(p1->x == p2->x && p1->y == p2->y) continue;
 
-        bool start_cap = i == 0 || !are_segments_joined(&segments[i - 1], &segments[i]);
-        bool end_cap = i + 1 == count || !are_segments_joined(&segments[i], &segments[i + 1]);
-        end = add_segment_vertices(end, &segments[i], layer_x, layer_y, offset, half_width, start_cap, end_cap);
+        bool start_cap = i == 0 || is_line_point_missing(&points[i - 1]);
+        bool end_cap = i + 2 >= point_count || is_line_point_missing(&points[i + 2]);
+        end = add_segment_vertices(end, (float)p1->x - layer_x, (float)p1->y - layer_y, (float)p2->x - layer_x,
+                                   (float)p2->y - layer_y, offset, half_width, start_cap, end_cap);
     }
-    return (uint32_t)(end - line_shader.vertices) / LINE_VERTEX_FLOATS;
+    *vertex_count = (uint32_t)(end - line_shader.vertices) / LINE_VERTEX_FLOATS;
+    return true;
 }
 
 /*Draws the line task with the shader, into the texture of the target layer. False when the shader does not draw this
@@ -1330,11 +1328,8 @@ static bool draw_line_with_shader(lv_draw_opengles_unit_t * u)
     if(!lv_area_intersect(&clip_area, &t->clip_area, &layer->buf_area)) return true;
 
     LV_PROFILER_DRAW_BEGIN;
-    line_shader.segment_count = 0;
-    line_shader.out_of_memory = false;
-    lv_draw_line_iterate(t, dsc, collect_line_segment);
-    uint32_t vertex_count = line_shader.out_of_memory ? 0 : make_line_vertices(layer, dsc);
-    if(line_shader.out_of_memory) {
+    uint32_t vertex_count;
+    if(!make_line_vertices(layer, dsc, &vertex_count)) {
         LV_PROFILER_DRAW_END;
         return false;
     }

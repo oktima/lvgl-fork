@@ -241,7 +241,8 @@ static int32_t nema_gfx_evaluate(lv_draw_unit_t * draw_unit, lv_draw_task_t * ta
         case LV_DRAW_TASK_TYPE_LINE: {
                 lv_draw_line_dsc_t * draw_line_dsc = (lv_draw_line_dsc_t *) task->draw_dsc;
                 bool is_dashed = (draw_line_dsc->dash_width && draw_line_dsc->dash_gap);
-                if(!is_dashed && !(draw_line_dsc->round_end || draw_line_dsc->round_start)) {
+                /*MEASUREMENT PROTOTYPE: the round caps are drawn by lv_draw_nema_gfx_line*/
+                if(!is_dashed) {
                     if(task->preference_score > 80) {
                         task->preference_score = 80;
                         task->preferred_draw_unit_id = DRAW_UNIT_ID_NEMA_GFX;
@@ -363,7 +364,7 @@ static void nema_gfx_execute_drawing(lv_draw_nema_gfx_unit_t * u)
             lv_draw_nema_gfx_layer(t, t->draw_dsc, &t->area);
             break;
         case LV_DRAW_TASK_TYPE_LINE:
-            lv_draw_line_iterate(t, t->draw_dsc, lv_draw_nema_gfx_line);
+            lv_draw_nema_gfx_line_task(t, t->draw_dsc);
             break;
 #if LV_USE_NEMA_VG
         case LV_DRAW_TASK_TYPE_ARC:

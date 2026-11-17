@@ -119,9 +119,18 @@ static void _draw_nema_gfx_img(lv_draw_task_t * t, const lv_draw_image_dsc_t * d
         blending_mode |= NEMA_BLOP_LUT;
     }
 
+    bool alpha_only = src_cf == LV_COLOR_FORMAT_A1 || src_cf == LV_COLOR_FORMAT_A2 ||
+                      src_cf == LV_COLOR_FORMAT_A4 || src_cf == LV_COLOR_FORMAT_A8;
+    if(alpha_only) {
+        /*An image with only alpha is drawn in its recolor, as the software renderer does. Its texels take the color
+         *of the texture mapping, which the labels leave at the color of the last one drawn: without a recolor the
+         *image would take that color, and NEMA_BLOP_RECOLOR would mix it in whenever the recolor is not opaque*/
+        lv_color32_t col32 = lv_color_to_32(dsc->recolor, LV_OPA_COVER);
+        nema_set_tex_color(nema_rgba(col32.red, col32.green, col32.blue, 0xffU));
+    }
     /*Guard for previous NemaGFX Version*/
 #ifdef NEMA_BLOP_RECOLOR
-    if(recolor) {
+    else if(recolor) {
         lv_color32_t col32 = lv_color_to_32(dsc->recolor, LV_OPA_MIX2(dsc->recolor_opa, dsc->opa));
         uint32_t color = nema_rgba(col32.red, col32.green, col32.blue, col32.alpha);
         nema_set_recolor_color(color);

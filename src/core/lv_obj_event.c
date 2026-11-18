@@ -253,8 +253,20 @@ uint32_t lv_event_get_key(lv_event_t * e)
     LV_CHECK_ARG_FORMAT_MSG(e->code == LV_EVENT_KEY,
                             return 0,
                             "invalid event code %" LV_PRId32, (int32_t)e->code);
-    uint32_t * k = lv_event_get_param(e);
-    return k ? *k : 0;
+    /*The parameter is `uint32_t[2]`: {key, modifier_keys} (see `lv_group_send_data`)*/
+    uint32_t * data = lv_event_get_param(e);
+    return data ? data[0] : 0;
+}
+
+uint32_t lv_event_get_modifier_keys(lv_event_t * e)
+{
+    LV_CHECK_ARG(e != NULL, return 0);
+    LV_CHECK_ARG_FORMAT_MSG(e->code == LV_EVENT_KEY,
+                            return 0,
+                            "invalid event code %" LV_PRId32, (int32_t)e->code);
+    /*The parameter is `uint32_t[2]`: {key, modifier_keys} (see `lv_group_send_data`)*/
+    uint32_t * data = lv_event_get_param(e);
+    return data ? data[1] : 0;
 }
 
 int32_t lv_event_get_rotary_diff(lv_event_t * e)

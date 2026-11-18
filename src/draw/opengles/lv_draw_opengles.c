@@ -29,6 +29,31 @@
 
 #define DRAW_UNIT_ID_OPENGLES 6
 
+#define USE_MY_LOG 0
+
+#if USE_MY_LOG
+    #define MY_LOG(...) LV_LOG_WARN(__VA_ARGS__)
+#else
+    #define MY_LOG(...) ((void)0)
+#endif
+
+/**
+ * Compare two draw descriptor structs of `dsc_type`, byte-wise, but skip `field`
+ * (e.g. a pointer compared separately). Matches the generic path after `lv_draw_dsc_base_t`.
+ */
+#define LV_DRAW_DSC_MEMCMP_SKIP_FIELD(lhs, rhs, dsc_type, field) \
+    do { \
+        int cmp_res = lv_memcmp((const uint8_t *)(lhs) + sizeof(lv_draw_dsc_base_t), \
+                                (const uint8_t *)(rhs) + sizeof(lv_draw_dsc_base_t), \
+                                offsetof(dsc_type, field) - sizeof(lv_draw_dsc_base_t)); \
+        if(cmp_res != 0) return cmp_res > 0 ? 1 : -1; \
+        const size_t after_field_offset = offsetof(dsc_type, field) + sizeof((lhs)->field); \
+        cmp_res = lv_memcmp((const uint8_t *)(lhs) + after_field_offset, \
+                            (const uint8_t *)(rhs) + after_field_offset, \
+                            sizeof(dsc_type) - after_field_offset); \
+        if(cmp_res != 0) return cmp_res > 0 ? 1 : -1; \
+    } while(0)
+
 /**********************
  *      TYPEDEFS
  **********************/
@@ -39,9 +64,14 @@ typedef struct {
     lv_cache_t * texture_cache;
     unsigned int framebuffer;
     lv_draw_buf_t render_draw_buf;
+    int max_texture_size;
 } lv_draw_opengles_unit_t;
 
 typedef struct {
+    lv_cache_slot_size_t slot;
+    lv_obj_t * obj; // Set only for dynamic parts
+    lv_part_t part; // Set only for dynamic parts
+    lv_draw_task_type_t task_type;
     lv_draw_dsc_base_t * draw_dsc;
     int32_t w;
     int32_t h;
@@ -55,17 +85,27 @@ typedef struct {
 static bool opengles_texture_cache_create_cb(cache_data_t * cached_data, void * user_data);
 static void opengles_texture_cache_free_cb(cache_data_t * cached_data, void * user_data);
 static lv_cache_compare_res_t opengles_texture_cache_compare_cb(const cache_data_t * lhs, const cache_data_t * rhs);
+static lv_cache_compare_res_t compare_dynamic_part(const cache_data_t * lhs, const cache_data_t * rhs);
+static lv_cache_compare_res_t compare_static_part(const cache_data_t * lhs, const cache_data_t * rhs);
+static lv_cache_compare_res_t compare_image_dsc(const lv_draw_image_dsc_t * lhs, const lv_draw_image_dsc_t * rhs);
+static lv_cache_compare_res_t compare_label_dsc(const lv_draw_label_dsc_t * lhs, const lv_draw_label_dsc_t * rhs);
 
 static void blend_texture_layer(lv_draw_task_t * t);
+static bool is_task_for_dynamic_part(const lv_draw_task_t * task);
+static lv_cache_entry_t * acquire_or_create_cache_entry(lv_draw_opengles_unit_t * u, cache_data_t * data_to_find);
 static void draw_from_cached_texture(lv_draw_task_t * t);
 
 static void execute_drawing(lv_draw_opengles_unit_t * u);
 
+static int32_t delete(lv_draw_unit_t * draw_unit);
 static int32_t dispatch(lv_draw_unit_t * draw_unit, lv_layer_t * layer);
 
 static int32_t evaluate(lv_draw_unit_t * draw_unit, lv_draw_task_t * task);
-static unsigned int draw_to_texture(lv_draw_opengles_unit_t * u, cache_data_t * cache_data);
-static void draw_texture_to_framebuffer(lv_draw_opengles_unit_t * u, unsigned int texture);
+static lv_area_t get_texture_area(const lv_draw_task_t * task);
+static unsigned int draw_to_texture(lv_draw_opengles_unit_t * u, cache_data_t * cache_data, lv_area_t * out_texture_area);
+static lv_area_t get_blit_area(const lv_draw_task_t * task);
+static void draw_texture_to_framebuffer(lv_draw_opengles_unit_t * u, unsigned int texture, lv_opa_t opa,
+                                        const lv_area_t * blit_area);
 static void draw_to_framebuffer(lv_draw_opengles_unit_t * u);
 
 static unsigned int layer_get_texture(lv_layer_t * layer);
@@ -75,6 +115,11 @@ static unsigned int create_texture(int32_t w, int32_t h, const void * data);
 
 #if LV_USE_3DTEXTURE
     static void lv_draw_opengles_3d(lv_draw_task_t * t, const lv_draw_3d_dsc_t * dsc, const lv_area_t * coords);
+#endif
+
+#if USE_MY_LOG
+    static const char * task_type_to_string(lv_draw_task_type_t type);
+    static const char * part_to_string(lv_part_t part);
 #endif
 
 /**********************
@@ -94,12 +139,15 @@ static lv_draw_buf_handlers_t gpu_draw_buf_handlers;
 
 void lv_draw_opengles_init(void)
 {
+    if(g_unit) return;
+
     lv_draw_opengles_unit_t * draw_opengles_unit = lv_draw_create_unit(sizeof(lv_draw_opengles_unit_t));
     draw_opengles_unit->base_unit.dispatch_cb = dispatch;
     draw_opengles_unit->base_unit.evaluate_cb = evaluate;
+    draw_opengles_unit->base_unit.delete_cb = delete;
     draw_opengles_unit->base_unit.name = "OPENGLES";
-    draw_opengles_unit->texture_cache = lv_cache_create(&lv_cache_class_lru_rb_count,
-    sizeof(cache_data_t), LV_DRAW_OPENGLES_TEXTURE_CACHE_COUNT, (lv_cache_ops_t) {
+    draw_opengles_unit->texture_cache = lv_cache_create(&lv_cache_class_lru_rb_size,
+    sizeof(cache_data_t), LV_DRAW_OPENGLES_TEXTURE_CACHE_SIZE, (lv_cache_ops_t) {
         .compare_cb = (lv_cache_compare_cb_t)opengles_texture_cache_compare_cb,
         .create_cb = (lv_cache_create_cb_t)opengles_texture_cache_create_cb,
         .free_cb = (lv_cache_free_cb_t)opengles_texture_cache_free_cb,
@@ -116,13 +164,18 @@ void lv_draw_opengles_init(void)
 
 void lv_draw_opengles_deinit(void)
 {
-    lv_free(g_unit->render_draw_buf.unaligned_data);
-    lv_cache_destroy(g_unit->texture_cache, g_unit);
-    if(g_unit->framebuffer != 0) {
-        GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
-        GL_CALL(glDeleteFramebuffers(1, &g_unit->framebuffer));
-    }
+    if(!g_unit) return;
+
+    /*Unlink the unit from the draw unit list. Its resources are freed in `delete()`*/
+    lv_draw_remove_unit((lv_draw_unit_t *)g_unit);
     g_unit = NULL;
+}
+
+size_t lv_draw_opengles_get_texture_cache_size(void)
+{
+    if(!g_unit) return 0;
+
+    return lv_cache_get_size(g_unit->texture_cache, NULL);
 }
 
 const lv_draw_buf_handlers_t * lv_draw_opengles_get_draw_buf_handlers(void)
@@ -206,7 +259,7 @@ void lv_draw_opengles_clear_layer_area(lv_layer_t * layer, const lv_area_t * are
 static bool opengles_texture_cache_create_cb(cache_data_t * cached_data, void * user_data)
 {
     LV_PROFILER_DRAW_BEGIN;
-    bool ret = draw_to_texture((lv_draw_opengles_unit_t *)user_data, cached_data) != 0;
+    bool ret = draw_to_texture((lv_draw_opengles_unit_t *)user_data, cached_data, NULL) != 0;
     LV_PROFILER_DRAW_END;
     return ret;
 }
@@ -216,16 +269,89 @@ static void opengles_texture_cache_free_cb(cache_data_t * cached_data, void * us
     LV_UNUSED(user_data);
     LV_PROFILER_DRAW_BEGIN;
 
+    /*Frees only what draw_to_texture() allocated. draw_dsc is NULL when the copy of the descriptor
+     *failed to allocate: then there is no texture either*/
+    if(cached_data->draw_dsc == NULL) {
+        LV_PROFILER_DRAW_END;
+        return;
+    }
+
+    MY_LOG("Removing cached texture %d of size %d x %d for task type %s, obj %p, part %s",
+           cached_data->texture, cached_data->w, cached_data->h,
+           task_type_to_string(cached_data->task_type),
+           cached_data->obj, part_to_string(cached_data->part));
+
+    switch(cached_data->task_type) {
+        case LV_DRAW_TASK_TYPE_IMAGE: {
+                lv_draw_image_dsc_t * image_dsc = (lv_draw_image_dsc_t *)cached_data->draw_dsc;
+                lv_image_src_t src_type = lv_image_src_get_type(image_dsc->src);
+                if(src_type == LV_IMAGE_SRC_FILE || src_type == LV_IMAGE_SRC_SYMBOL) {
+                    lv_free((void *)image_dsc->src);
+                    image_dsc->src = NULL;
+                }
+            }
+            break;
+        case LV_DRAW_TASK_TYPE_LABEL: {
+                lv_draw_label_dsc_t * label_dsc = (lv_draw_label_dsc_t *)cached_data->draw_dsc;
+                if(label_dsc->text != NULL) {
+                    lv_free((void *)label_dsc->text);
+                    label_dsc->text = NULL;
+                }
+            }
+            break;
+        default:
+            break;
+    }
+
     lv_free(cached_data->draw_dsc);
     GL_CALL(glDeleteTextures(1, &cached_data->texture));
     cached_data->draw_dsc = NULL;
     cached_data->texture = 0;
+
     LV_PROFILER_DRAW_END;
 }
 
 static lv_cache_compare_res_t opengles_texture_cache_compare_cb(const cache_data_t * lhs, const cache_data_t * rhs)
 {
     if(lhs == rhs) return 0;
+
+    if(lhs->obj != NULL && rhs->obj != NULL) {
+        return compare_dynamic_part(lhs, rhs);
+    }
+    else if(lhs->obj == NULL && rhs->obj == NULL) {
+        return compare_static_part(lhs, rhs);
+    }
+    else {
+        return lhs->obj == NULL ? -1 : 1;
+    }
+}
+
+static lv_cache_compare_res_t compare_dynamic_part(const cache_data_t * lhs, const cache_data_t * rhs)
+{
+    if(lhs == rhs) return 0;
+
+    if(lhs->obj != rhs->obj) {
+        return lhs->obj > rhs->obj ? 1 : -1;
+    }
+
+    if(lhs->part != rhs->part) {
+        return lhs->part > rhs->part ? 1 : -1;
+    }
+
+    if(lhs->task_type != rhs->task_type) {
+        return lhs->task_type > rhs->task_type ? 1 : -1;
+    }
+
+    return 0;
+}
+
+static lv_cache_compare_res_t compare_static_part(const cache_data_t * lhs, const cache_data_t * rhs)
+{
+    if(lhs == rhs) return 0;
+
+    if(lhs->task_type != rhs->task_type) {
+        return lhs->task_type > rhs->task_type ? 1 : -1;
+    }
 
     if(lhs->w != rhs->w) {
         return lhs->w > rhs->w ? 1 : -1;
@@ -247,6 +373,15 @@ static lv_cache_compare_res_t opengles_texture_cache_compare_cb(const cache_data
         return lhs_dsc_size > rhs_dsc_size ? 1 : -1;
     }
 
+    switch(lhs->task_type) {
+        case LV_DRAW_TASK_TYPE_IMAGE:
+            return compare_image_dsc((const lv_draw_image_dsc_t *)lhs->draw_dsc, (const lv_draw_image_dsc_t *)rhs->draw_dsc);
+        case LV_DRAW_TASK_TYPE_LABEL:
+            return compare_label_dsc((const lv_draw_label_dsc_t *)lhs->draw_dsc, (const lv_draw_label_dsc_t *)rhs->draw_dsc);
+        default:
+            break;
+    }
+
     const uint8_t * left_draw_dsc = (const uint8_t *)lhs->draw_dsc;
     const uint8_t * right_draw_dsc = (const uint8_t *)rhs->draw_dsc;
     left_draw_dsc += sizeof(lv_draw_dsc_base_t);
@@ -259,6 +394,68 @@ static lv_cache_compare_res_t opengles_texture_cache_compare_cb(const cache_data
     }
 
     return 0;
+}
+
+static lv_cache_compare_res_t compare_image_dsc(const lv_draw_image_dsc_t * lhs, const lv_draw_image_dsc_t * rhs)
+{
+    if(lhs == rhs) return 0;
+
+    LV_DRAW_DSC_MEMCMP_SKIP_FIELD(lhs, rhs, lv_draw_image_dsc_t, src);
+
+    lv_image_src_t lhs_src_type = lv_image_src_get_type(lhs->src);
+    lv_image_src_t rhs_src_type = lv_image_src_get_type(rhs->src);
+    if(lhs_src_type != rhs_src_type) {
+        return lhs_src_type > rhs_src_type ? 1 : -1;
+    }
+
+    /*Compare src: string compare for file/symbol sources, pointer compare otherwise*/
+    if(lhs_src_type == LV_IMAGE_SRC_FILE || lhs_src_type == LV_IMAGE_SRC_SYMBOL) {
+        if(lhs->src == NULL || rhs->src == NULL) {
+            if(lhs->src == rhs->src) return 0;
+            return lhs->src == NULL ? -1 : 1;
+        }
+        int cmp_res = lv_strcmp((const char *)lhs->src, (const char *)rhs->src);
+        if(cmp_res != 0) return cmp_res > 0 ? 1 : -1;
+    }
+    else {
+        if(lhs->src != rhs->src) return lhs->src > rhs->src ? 1 : -1;
+    }
+
+    return 0;
+}
+
+static lv_cache_compare_res_t compare_label_dsc(const lv_draw_label_dsc_t * lhs, const lv_draw_label_dsc_t * rhs)
+{
+    if(lhs == rhs) return 0;
+
+    LV_DRAW_DSC_MEMCMP_SKIP_FIELD(lhs, rhs, lv_draw_label_dsc_t, text);
+
+    if(lhs->text == NULL || rhs->text == NULL) {
+        if(lhs->text == rhs->text) return 0;
+        return lhs->text == NULL ? -1 : 1;
+    }
+
+    int cmp_res = lv_strcmp(lhs->text, rhs->text);
+    if(cmp_res != 0) return cmp_res > 0 ? 1 : -1;
+
+    return 0;
+}
+
+static int32_t delete(lv_draw_unit_t * draw_unit)
+{
+    lv_draw_opengles_unit_t * draw_opengles_unit = (lv_draw_opengles_unit_t *) draw_unit;
+    lv_free(draw_opengles_unit->render_draw_buf.unaligned_data);
+    lv_cache_destroy(draw_opengles_unit->texture_cache, draw_opengles_unit);
+    if(draw_opengles_unit->framebuffer != 0) {
+        GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
+        GL_CALL(glDeleteFramebuffers(1, &draw_opengles_unit->framebuffer));
+    }
+
+    if(draw_opengles_unit == g_unit) {
+        g_unit = NULL;
+    }
+
+    return LV_RESULT_OK;
 }
 
 static int32_t dispatch(lv_draw_unit_t * draw_unit, lv_layer_t * layer)
@@ -300,6 +497,30 @@ static int32_t evaluate(lv_draw_unit_t * draw_unit, lv_draw_task_t * task)
 {
     LV_UNUSED(draw_unit);
 
+    /*Claim only the task types handled by `execute_drawing()` / `draw_to_texture()`*/
+    switch(task->type) {
+        case LV_DRAW_TASK_TYPE_FILL:
+        case LV_DRAW_TASK_TYPE_BORDER:
+        case LV_DRAW_TASK_TYPE_BOX_SHADOW:
+        case LV_DRAW_TASK_TYPE_LABEL:
+        case LV_DRAW_TASK_TYPE_ARC:
+        case LV_DRAW_TASK_TYPE_LINE:
+        case LV_DRAW_TASK_TYPE_TRIANGLE:
+        case LV_DRAW_TASK_TYPE_LAYER:
+#if LV_USE_3DTEXTURE
+        case LV_DRAW_TASK_TYPE_3D:
+#endif
+            break;
+        case LV_DRAW_TASK_TYPE_IMAGE: {
+                if(((lv_draw_image_dsc_t *)task->draw_dsc)->header.cf >= LV_COLOR_FORMAT_PROPRIETARY_START) {
+                    return 0;
+                }
+                break;
+            }
+        default:
+            return 0;
+    }
+
     /*If not refreshing the display probably it's a canvas rendering
      *which his not supported in OpenGL as it's not a texture.*/
     if(lv_refr_get_disp_refreshing() == NULL) return 0;
@@ -311,7 +532,85 @@ static int32_t evaluate(lv_draw_unit_t * draw_unit, lv_draw_task_t * task)
     return 0;
 }
 
-static unsigned int draw_to_texture(lv_draw_opengles_unit_t * u, cache_data_t * cache_data)
+/**
+ * Temporarily replace the opacity of the task's draw descriptor.
+ * Textures are cached without opacity applied; the opacity is applied with GPU blending instead.
+ * @return the previous opacity
+ */
+static lv_opa_t replace_opa_in_task(const lv_draw_task_t * task, lv_opa_t opa)
+{
+    LV_ASSERT_NULL(task);
+
+    switch(task->type) {
+        case LV_DRAW_TASK_TYPE_FILL: {
+                lv_draw_fill_dsc_t * fill_dsc = (lv_draw_fill_dsc_t *)task->draw_dsc;
+                lv_opa_t old_opa = fill_dsc->opa;
+                fill_dsc->opa = opa;
+                return old_opa;
+            }
+        case LV_DRAW_TASK_TYPE_BORDER: {
+                lv_draw_border_dsc_t * border_dsc = (lv_draw_border_dsc_t *)task->draw_dsc;
+                lv_opa_t old_opa = border_dsc->opa;
+                border_dsc->opa = opa;
+                return old_opa;
+            }
+        case LV_DRAW_TASK_TYPE_BOX_SHADOW: {
+                lv_draw_box_shadow_dsc_t * box_shadow_dsc = (lv_draw_box_shadow_dsc_t *)task->draw_dsc;
+                lv_opa_t old_opa = box_shadow_dsc->opa;
+                box_shadow_dsc->opa = opa;
+                return old_opa;
+            }
+        case LV_DRAW_TASK_TYPE_LABEL: {
+                lv_draw_label_dsc_t * label_dsc = (lv_draw_label_dsc_t *)task->draw_dsc;
+                lv_opa_t old_opa = label_dsc->opa;
+                label_dsc->opa = opa;
+                return old_opa;
+            }
+        case LV_DRAW_TASK_TYPE_ARC: {
+                lv_draw_arc_dsc_t * arc_dsc = (lv_draw_arc_dsc_t *)task->draw_dsc;
+                lv_opa_t old_opa = arc_dsc->opa;
+                arc_dsc->opa = opa;
+                return old_opa;
+            }
+        case LV_DRAW_TASK_TYPE_LINE: {
+                lv_draw_line_dsc_t * line_dsc = (lv_draw_line_dsc_t *)task->draw_dsc;
+                lv_opa_t old_opa = line_dsc->opa;
+                line_dsc->opa = opa;
+                return old_opa;
+            }
+        case LV_DRAW_TASK_TYPE_TRIANGLE: {
+                lv_draw_triangle_dsc_t * triangle_dsc = (lv_draw_triangle_dsc_t *)task->draw_dsc;
+                lv_opa_t old_opa = triangle_dsc->opa;
+                triangle_dsc->opa = opa;
+                return old_opa;
+            }
+        case LV_DRAW_TASK_TYPE_IMAGE: {
+                lv_draw_image_dsc_t * image_dsc = (lv_draw_image_dsc_t *)task->draw_dsc;
+                lv_opa_t old_opa = image_dsc->opa;
+                image_dsc->opa = opa;
+                return old_opa;
+            }
+        default: {
+                LV_LOG_ERROR("Unsupported draw task type: %d", task->type);
+                LV_ASSERT(false);
+                return LV_OPA_COVER;
+            }
+    }
+}
+
+static lv_area_t get_texture_area(const lv_draw_task_t * task)
+{
+    if(task->type == LV_DRAW_TASK_TYPE_IMAGE) {
+        lv_draw_image_dsc_t * img_dsc = task->draw_dsc;
+        if(img_dsc->real_slice_area.x2 != LV_COORD_MIN) {
+            return img_dsc->real_slice_area;
+        }
+    }
+
+    return task->_real_area;
+}
+
+static unsigned int draw_to_texture(lv_draw_opengles_unit_t * u, cache_data_t * cache_data, lv_area_t * out_texture_area)
 {
     LV_PROFILER_DRAW_BEGIN;
     lv_draw_task_t * task = u->task_act;
@@ -319,8 +618,24 @@ static unsigned int draw_to_texture(lv_draw_opengles_unit_t * u, cache_data_t * 
     lv_layer_t dest_layer;
     lv_layer_init(&dest_layer);
 
-    int32_t texture_w = lv_area_get_width(&task->_real_area);
-    int32_t texture_h = lv_area_get_height(&task->_real_area);
+    lv_area_t texture_area;
+    if(cache_data != NULL) {
+        texture_area = get_texture_area(task);
+    }
+    else {
+        lv_area_intersect(&texture_area, &task->_real_area, &task->clip_area);
+    }
+
+    int32_t texture_w = lv_area_get_width(&texture_area);
+    int32_t texture_h = lv_area_get_height(&texture_area);
+    if(texture_w <= 0 || texture_h <= 0) {
+        /*Nothing to draw. Never reached when caching: draw_from_cached_texture() leaves before the cache
+         *on an empty area. Here cache_data->draw_dsc would still be the task's own descriptor, not a copy,
+         *and opengles_texture_cache_free_cb() would free it when the cache discards the entry*/
+        LV_ASSERT(cache_data == NULL);
+        LV_PROFILER_DRAW_END;
+        return 0;
+    }
 
     if(NULL == lv_draw_buf_reshape(&u->render_draw_buf, LV_COLOR_FORMAT_ARGB8888, texture_w, texture_h, LV_STRIDE_AUTO)) {
         uint8_t * data = u->render_draw_buf.unaligned_data;
@@ -335,10 +650,10 @@ static unsigned int draw_to_texture(lv_draw_opengles_unit_t * u, cache_data_t * 
     dest_layer.draw_buf = &u->render_draw_buf;
     dest_layer.color_format = LV_COLOR_FORMAT_ARGB8888;
 
-    dest_layer.buf_area = task->_real_area;
-    dest_layer._clip_area = task->_real_area;
-    dest_layer.phy_clip_area = task->_real_area;
-    lv_memzero(u->render_draw_buf.data, lv_area_get_size(&task->_real_area) * 4);
+    dest_layer.buf_area = texture_area;
+    dest_layer._clip_area = texture_area;
+    dest_layer.phy_clip_area = texture_area;
+    lv_memzero(u->render_draw_buf.data, lv_area_get_size(&texture_area) * 4);
 
     lv_display_t * disp = lv_refr_get_disp_refreshing();
 
@@ -411,6 +726,14 @@ static unsigned int draw_to_texture(lv_draw_opengles_unit_t * u, cache_data_t * 
                 lv_memcpy(&label_dsc, task->draw_dsc, sizeof(label_dsc));
                 label_dsc.base.user_data = (void *)(uintptr_t)1;
                 lv_draw_label(&dest_layer, &label_dsc, &task->area);
+
+                /*The text pointer might not be valid later: keep a copy of it in the cached descriptor*/
+                if(cache_data != NULL) {
+                    lv_draw_label_dsc_t * cached_label_dsc = (lv_draw_label_dsc_t *)cache_data->draw_dsc;
+                    if(label_dsc.text != NULL) {
+                        cached_label_dsc->text = lv_strdup(label_dsc.text);
+                    }
+                }
             }
             break;
         case LV_DRAW_TASK_TYPE_ARC: {
@@ -439,6 +762,15 @@ static unsigned int draw_to_texture(lv_draw_opengles_unit_t * u, cache_data_t * 
                 lv_memcpy(&image_dsc, task->draw_dsc, sizeof(image_dsc));
                 image_dsc.base.user_data = (void *)(uintptr_t)1;
                 lv_draw_image(&dest_layer, &image_dsc, &task->area);
+
+                /*The path of file and symbol sources might not be valid later: keep a copy of it*/
+                if(cache_data != NULL) {
+                    lv_draw_image_dsc_t * cached_image_dsc = (lv_draw_image_dsc_t *)cache_data->draw_dsc;
+                    lv_image_src_t src_type = lv_image_src_get_type(image_dsc.src);
+                    if(src_type == LV_IMAGE_SRC_FILE || src_type == LV_IMAGE_SRC_SYMBOL) {
+                        cached_image_dsc->src = lv_strdup(image_dsc.src);
+                    }
+                }
             }
             break;
         default:
@@ -462,13 +794,22 @@ static unsigned int draw_to_texture(lv_draw_opengles_unit_t * u, cache_data_t * 
     unsigned int texture = create_texture(texture_w, texture_h, u->render_draw_buf.data);
 
     if(cache_data != NULL) {
-        cache_data->w = texture_w;
-        cache_data->h = texture_h;
+        /*w, h (and the slot size) are already set from the searched key*/
         cache_data->texture = texture;
+
+        MY_LOG("Caching %s texture %d of size %d x %d for task type %s, obj %p, part %s",
+               cache_data->obj != NULL ? "dynamic" : "static",
+               cache_data->texture, cache_data->w, cache_data->h,
+               task_type_to_string(cache_data->task_type),
+               obj, part_to_string(((lv_draw_dsc_base_t *)task->draw_dsc)->part));
     }
 
     if(obj) {
         lv_obj_set_send_draw_task_events(obj, original_send_draw_task_event);
+    }
+
+    if(out_texture_area != NULL) {
+        *out_texture_area = texture_area;
     }
 
     LV_PROFILER_DRAW_END;
@@ -527,7 +868,8 @@ static void blend_texture_layer(lv_draw_task_t * t)
     LV_PROFILER_DRAW_END;
 }
 
-static void draw_texture_to_framebuffer(lv_draw_opengles_unit_t * u, unsigned int texture)
+static void draw_texture_to_framebuffer(lv_draw_opengles_unit_t * u, unsigned int texture, lv_opa_t opa,
+                                        const lv_area_t * blit_area)
 {
     lv_draw_task_t * t = u->task_act;
 
@@ -554,9 +896,22 @@ static void draw_texture_to_framebuffer(lv_draw_opengles_unit_t * u, unsigned in
 
     lv_opengles_viewport(0, 0, targ_tex_w, targ_tex_h);
     lv_area_move(&t->clip_area, -dest_layer->buf_area.x1, -dest_layer->buf_area.y1);
-    lv_area_t render_area = t->_real_area;
+    /*Translate blit_area from screen coordinates to dest_layer coordinates.*/
+    lv_area_t render_area = *blit_area;
     lv_area_move(&render_area, -dest_layer->buf_area.x1, -dest_layer->buf_area.y1);
-    lv_opengles_render_texture_internal(texture, &render_area, 0xff, targ_tex_w, targ_tex_h, &t->clip_area, h_flip, v_flip);
+
+    /*The cached texture is stored without the descriptor's opacity: apply it with
+     *(premultiplied) GPU alpha blending*/
+    if(opa != LV_OPA_COVER) {
+        GL_CALL(glEnable(GL_BLEND));
+        GL_CALL(glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA));
+    }
+
+    lv_opengles_render_texture_internal(texture, &render_area, opa, targ_tex_w, targ_tex_h, &t->clip_area, h_flip, v_flip);
+
+    if(opa != LV_OPA_COVER) {
+        GL_CALL(glDisable(GL_BLEND));
+    }
 
     if(target_texture) {
         GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
@@ -565,24 +920,97 @@ static void draw_texture_to_framebuffer(lv_draw_opengles_unit_t * u, unsigned in
 
 static void draw_to_framebuffer(lv_draw_opengles_unit_t * u)
 {
-    unsigned int texture = draw_to_texture(u, NULL);
+    lv_area_t draw_area;
+    unsigned int texture = draw_to_texture(u, NULL, &draw_area);
     if(texture == 0) {
         /*Texture creation failed; nothing to render to the framebuffer.*/
         return;
     }
-    draw_texture_to_framebuffer(u, texture);
+    /*Use LV_OPA_COVER to ensure the texture is drawn to the framebuffer without any blending.*/
+    draw_texture_to_framebuffer(u, texture, LV_OPA_COVER, &draw_area);
     GL_CALL(glDeleteTextures(1, &texture));
+}
+
+static lv_area_t get_blit_area(const lv_draw_task_t * task)
+{
+    /*For images with a valid real_slice_area the cached texture covers only that slice,
+     *not the full _real_area. After `draw_from_cached_texture` has offset the descriptor for the
+     *cache key, `real_slice_area` is relative to `task->area`; convert back to absolute for the blit.
+     *Otherwise return `_real_area` (already absolute).*/
+    if(task->type == LV_DRAW_TASK_TYPE_IMAGE) {
+        const lv_draw_image_dsc_t * img_dsc = (const lv_draw_image_dsc_t *)task->draw_dsc;
+        if(img_dsc->real_slice_area.x2 != LV_COORD_MIN) {
+            lv_area_t abs_slice_area = img_dsc->real_slice_area;
+            lv_area_move(&abs_slice_area, task->area.x1, task->area.y1);
+            return abs_slice_area;
+        }
+    }
+
+    return task->_real_area;
+}
+
+static bool is_task_for_dynamic_part(const lv_draw_task_t * task)
+{
+    if(task->type == LV_DRAW_TASK_TYPE_LABEL) {
+        return true;
+    }
+
+    const lv_draw_dsc_base_t * base_dsc = (const lv_draw_dsc_base_t *)task->draw_dsc;
+    if(base_dsc->obj == NULL) {
+        return false;
+    }
+
+    return base_dsc->part == LV_PART_INDICATOR || base_dsc->part == LV_PART_SCROLLBAR;
+}
+
+static lv_cache_entry_t * acquire_or_create_cache_entry(lv_draw_opengles_unit_t * u, cache_data_t * data_to_find)
+{
+    /*For dynamic parts, returns the existing entry if the draw descriptor is the same;
+     *otherwise, replaces it with the new one.*/
+    if(data_to_find->obj != NULL) {
+        lv_cache_entry_t * entry_cached = lv_cache_acquire(u->texture_cache, data_to_find, u);
+        if(entry_cached) {
+            cache_data_t * data_cached = lv_cache_entry_get_data(entry_cached);
+            if(compare_static_part(data_to_find, data_cached) == 0) {
+                return entry_cached;
+            }
+
+            MY_LOG("Replacing cached texture %d of size %d x %d for task type %s, obj %p, part %s",
+                   data_cached->texture, data_cached->w, data_cached->h,
+                   task_type_to_string(data_cached->task_type),
+                   data_cached->obj, part_to_string(data_cached->part));
+
+            lv_cache_release(u->texture_cache, entry_cached, u);
+            lv_cache_drop(u->texture_cache, data_to_find, u);
+        }
+    }
+
+    return lv_cache_acquire_or_create(u->texture_cache, data_to_find, u);
 }
 
 static void draw_from_cached_texture(lv_draw_task_t * t)
 {
     LV_PROFILER_DRAW_BEGIN;
     lv_draw_opengles_unit_t * u = (lv_draw_opengles_unit_t *)t->draw_unit;
+    lv_draw_dsc_base_t * base_dsc = (lv_draw_dsc_base_t *)t->draw_dsc;
+
     cache_data_t data_to_find;
-    data_to_find.draw_dsc = (lv_draw_dsc_base_t *)t->draw_dsc;
-    data_to_find.w = lv_area_get_width(&t->_real_area);
-    data_to_find.h = lv_area_get_height(&t->_real_area);
-    data_to_find.texture = 0;
+    lv_memset(&data_to_find, 0, sizeof(data_to_find));
+    if(is_task_for_dynamic_part(t)) {
+        data_to_find.obj = base_dsc->obj;
+        data_to_find.part = base_dsc->part;
+    }
+    data_to_find.task_type = t->type;
+    data_to_find.draw_dsc = base_dsc;
+    lv_area_t texture_area = get_texture_area(t);
+    data_to_find.w = lv_area_get_width(&texture_area);
+    data_to_find.h = lv_area_get_height(&texture_area);
+    if(data_to_find.w <= 0 || data_to_find.h <= 0) {
+        /*An empty area: nothing to draw, and nothing to cache*/
+        LV_PROFILER_DRAW_END;
+        return;
+    }
+    data_to_find.slot.size = data_to_find.w * data_to_find.h * 4;
 
     /*user_data stores the renderer to differentiate it from SW rendered tasks.
      *However the cached texture is independent from the renderer so use NULL user_data*/
@@ -595,6 +1023,12 @@ static void draw_from_cached_texture(lv_draw_task_t * t)
     if(t->type == LV_DRAW_TASK_TYPE_IMAGE) {
         lv_draw_image_dsc_t * img_dsc = (lv_draw_image_dsc_t *)data_to_find.draw_dsc;
         lv_area_move(&img_dsc->image_area, -t->area.x1, -t->area.y1);
+
+        if(img_dsc->real_slice_area.x2 != LV_COORD_MIN) {
+            /*Same reason as img_dsc->image_area above: make img_dsc->real_slice_area relative
+             *before using for cache*/
+            lv_area_move(&img_dsc->real_slice_area, -t->area.x1, -t->area.y1);
+        }
     }
     else if(t->type == LV_DRAW_TASK_TYPE_TRIANGLE) {
         lv_draw_triangle_dsc_t * tri_dsc = (lv_draw_triangle_dsc_t *)data_to_find.draw_dsc;
@@ -620,22 +1054,26 @@ static void draw_from_cached_texture(lv_draw_task_t * t)
 
     lv_area_move(&t->area, -a.x1, -a.y1);
     lv_area_move(&t->_real_area, -a.x1, -a.y1);
+    /*Cache the texture without the descriptor's opacity, it's applied when blitting*/
+    lv_opa_t orig_opa = replace_opa_in_task(t, LV_OPA_COVER);
 
-    lv_cache_entry_t * entry_cached = lv_cache_acquire_or_create(u->texture_cache, &data_to_find, u);
+    lv_cache_entry_t * entry_cached = acquire_or_create_cache_entry(u, &data_to_find);
 
     lv_area_move(&t->area, a.x1, a.y1);
     lv_area_move(&t->_real_area, a.x1, a.y1);
+    replace_opa_in_task(t, orig_opa);
+
+    data_to_find.draw_dsc->user_data = user_data_saved;
 
     if(!entry_cached) {
         LV_PROFILER_DRAW_END;
         return;
     }
 
-    data_to_find.draw_dsc->user_data = user_data_saved;
-
     cache_data_t * data_cached = lv_cache_entry_get_data(entry_cached);
     unsigned int texture = data_cached->texture;
-    draw_texture_to_framebuffer(u, texture);
+    lv_area_t blit_area = get_blit_area(t);
+    draw_texture_to_framebuffer(u, texture, orig_opa, &blit_area);
 
     lv_cache_release(u->texture_cache, entry_cached, u);
 
@@ -646,6 +1084,10 @@ static void execute_drawing(lv_draw_opengles_unit_t * u)
 {
     lv_draw_task_t * t = u->task_act;
     t->draw_unit = (lv_draw_unit_t *)u;
+
+    if(u->max_texture_size == 0) {
+        GL_CALL(glGetIntegerv(GL_MAX_TEXTURE_SIZE, &u->max_texture_size));
+    }
 
     /* the shader-based fill is not working reliably with EGL. */
     switch(t->type) {
@@ -702,18 +1144,10 @@ static void execute_drawing(lv_draw_opengles_unit_t * u)
                 }
                 break;
             }
-        case LV_DRAW_TASK_TYPE_LABEL: {
-                /*Do not cache non static (const) texts as the text's pointer can be freed/reallocated
-                 *at any time resulting in a wild pointer in the cached draw dsc. */
-                lv_draw_label_dsc_t * label_dsc = t->draw_dsc;
-                if(!label_dsc->text_static) {
-                    draw_to_framebuffer(u);
-                    return;
-                }
-                break;
-            }
+        /*Labels are cached even with non static texts: the cached descriptor keeps a copy of
+         *the text (see draw_to_texture()) and they are cached as dynamic parts*/
         case LV_DRAW_TASK_TYPE_LINE: {
-                /*Do not cache lines rendered from points at dsc->points will be freed*/
+                /*Do not cache lines rendered from points as dsc->points will be freed*/
                 lv_draw_line_dsc_t * line_dsc = t->draw_dsc;
                 if(line_dsc->points) {
                     draw_to_framebuffer(u);
@@ -733,6 +1167,14 @@ static void execute_drawing(lv_draw_opengles_unit_t * u)
 #endif
         default:
             break;
+    }
+
+    /*Tasks whose real area exceeds the GL texture size limit cannot be stored in a
+     *single texture. Skip the cache and render directly using the clipped area.*/
+    if(lv_area_get_width(&t->_real_area) > u->max_texture_size ||
+       lv_area_get_height(&t->_real_area) > u->max_texture_size) {
+        draw_to_framebuffer(u);
+        return;
     }
 
     draw_from_cached_texture(t);
@@ -824,5 +1266,80 @@ static void lv_draw_opengles_3d(lv_draw_task_t * t, const lv_draw_3d_dsc_t * dsc
     LV_PROFILER_DRAW_END;
 }
 #endif /*LV_USE_3DTEXTURE*/
+
+#if USE_MY_LOG
+
+static const char * task_type_to_string(lv_draw_task_type_t type)
+{
+    switch(type) {
+        case LV_DRAW_TASK_TYPE_NONE:
+            return "NONE";
+        case LV_DRAW_TASK_TYPE_FILL:
+            return "FILL";
+        case LV_DRAW_TASK_TYPE_BORDER:
+            return "BORDER";
+        case LV_DRAW_TASK_TYPE_BOX_SHADOW:
+            return "BOX_SHADOW";
+        case LV_DRAW_TASK_TYPE_LETTER:
+            return "LETTER";
+        case LV_DRAW_TASK_TYPE_LABEL:
+            return "LABEL";
+        case LV_DRAW_TASK_TYPE_IMAGE:
+            return "IMAGE";
+        case LV_DRAW_TASK_TYPE_LAYER:
+            return "LAYER";
+        case LV_DRAW_TASK_TYPE_LINE:
+            return "LINE";
+        case LV_DRAW_TASK_TYPE_ARC:
+            return "ARC";
+        case LV_DRAW_TASK_TYPE_TRIANGLE:
+            return "TRIANGLE";
+        case LV_DRAW_TASK_TYPE_MASK_RECTANGLE:
+            return "MASK_RECTANGLE";
+        case LV_DRAW_TASK_TYPE_MASK_BITMAP:
+            return "MASK_BITMAP";
+        case LV_DRAW_TASK_TYPE_BLUR:
+            return "BLUR";
+#if LV_USE_VECTOR_GRAPHIC
+        case LV_DRAW_TASK_TYPE_VECTOR:
+            return "VECTOR";
+#endif
+#if LV_USE_3DTEXTURE
+        case LV_DRAW_TASK_TYPE_3D:
+            return "3D";
+#endif
+        default:
+            return "UNKNOWN";
+    }
+}
+
+static const char * part_to_string(lv_part_t part)
+{
+    switch(part) {
+        case LV_PART_MAIN:
+            return "MAIN";
+        case LV_PART_SCROLLBAR:
+            return "SCROLLBAR";
+        case LV_PART_INDICATOR:
+            return "INDICATOR";
+        case LV_PART_KNOB:
+            return "KNOB";
+        case LV_PART_SELECTED:
+            return "SELECTED";
+        case LV_PART_ITEMS:
+            return "ITEMS";
+        case LV_PART_CURSOR:
+            return "CURSOR";
+        case LV_PART_ANY:
+            return "ANY";
+        default:
+            if(part >= LV_PART_CUSTOM_FIRST && part < LV_PART_ANY) {
+                return "CUSTOM";
+            }
+            return "UNKNOWN";
+    }
+}
+
+#endif /*USE_MY_LOG*/
 
 #endif /*LV_USE_DRAW_OPENGLES*/

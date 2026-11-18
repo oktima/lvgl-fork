@@ -52,6 +52,8 @@ void lv_draw_g2d_deinit(void);
 
 void lv_draw_buf_g2d_init_handlers(void);
 
+void lv_draw_buf_g2d_deinit_handlers(void);
+
 void lv_draw_g2d_fill(lv_draw_task_t * t);
 
 void lv_draw_g2d_img(lv_draw_task_t * t);

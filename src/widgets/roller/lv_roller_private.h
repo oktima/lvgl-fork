@@ -38,6 +38,7 @@ struct _lv_roller_t {
     uint32_t inf_page_cnt;        /**< Number of extra pages added to make the roller look infinite */
     lv_roller_mode_t mode : 2;
     uint32_t moved : 1;
+    uint32_t selected_highlight : 1; /**< 1: Make the selected option highlighted*/
 };
 
 

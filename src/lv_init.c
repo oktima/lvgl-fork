@@ -228,9 +228,10 @@ void lv_init(void)
     lv_draw_pxp_init();
 #endif
 
-#if LV_USE_DRAW_G2D
-    lv_draw_g2d_init();
-#endif
+/* Oktima: G2D is initialized on demand by the Wayland-G2D backend (lv_binding_rust), not here */
+// #if LV_USE_DRAW_G2D
+//     lv_draw_g2d_init();
+// #endif
 
 #if LV_USE_DRAW_DAVE2D
     lv_draw_dave2d_init();
@@ -244,9 +245,10 @@ void lv_init(void)
     lv_draw_dma2d_init();
 #endif
 
-#if LV_USE_DRAW_OPENGLES
-    lv_draw_opengles_init();
-#endif
+/* Oktima: the OpenGL ES draw unit is initialized on demand by the Wayland-EGL backend (lv_binding_rust), not here */
+// #if LV_USE_DRAW_OPENGLES
+//     lv_draw_opengles_init();
+// #endif
 
 #if LV_USE_PPA
     lv_draw_ppa_init();
@@ -464,6 +466,7 @@ void lv_deinit(void)
 #if LV_USE_WAYLAND
     lv_wayland_deinit();
 #endif
+
 #if LV_USE_DRAW_G2D
     lv_draw_g2d_deinit();
 #endif

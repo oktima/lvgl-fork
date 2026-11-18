@@ -462,6 +462,12 @@ uint32_t lv_arc_get_change_rate(lv_obj_t * obj)
     return ((lv_arc_t *)obj)->chg_rate;
 }
 
+bool lv_arc_is_dragged(const lv_obj_t * obj)
+{
+    LV_CHECK_OBJ(obj, MY_CLASS, return false);
+    return ((lv_arc_t *)obj)->dragging;
+}
+
 /*=====================
  * Other functions
  *====================*/
@@ -976,17 +982,16 @@ static void get_center(const lv_obj_t * obj, lv_point_t * center, int32_t * arc_
     LV_ASSERT(center != NULL);
     LV_ASSERT(arc_r != NULL);
 
-    int32_t left_bg = lv_obj_get_style_pad_left_internal(obj, LV_PART_MAIN);
-    int32_t right_bg = lv_obj_get_style_pad_right_internal(obj, LV_PART_MAIN);
-    int32_t top_bg = lv_obj_get_style_pad_top_internal(obj, LV_PART_MAIN);
-    int32_t bottom_bg = lv_obj_get_style_pad_bottom_internal(obj, LV_PART_MAIN);
+    int32_t left_space = lv_obj_get_style_space_left_internal(obj, LV_PART_MAIN);
+    int32_t top_space = lv_obj_get_style_space_top_internal(obj, LV_PART_MAIN);
 
-    int32_t r = (LV_MIN(lv_obj_get_width(obj) - left_bg - right_bg,
-                        lv_obj_get_height(obj) - top_bg - bottom_bg)) / 2;
+    int32_t w = lv_obj_get_content_width(obj);
+    int32_t h = lv_obj_get_content_height(obj);
+    int32_t r = LV_MIN(w, h) / 2;
 
     *arc_r = r;
-    center->x = obj->coords.x1 + r + left_bg;
-    center->y = obj->coords.y1 + r + top_bg;
+    center->x = obj->coords.x1 + left_space + w / 2;
+    center->y = obj->coords.y1 + top_space + h / 2;
 }
 
 static lv_value_precise_t get_angle(const lv_obj_t * obj)

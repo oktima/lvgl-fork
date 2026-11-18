@@ -534,7 +534,7 @@ static void lv_spinbox_event(const lv_obj_class_t * class_p, lv_event_t * e)
         lv_indev_t * indev = lv_indev_active();
         lv_indev_type_t indev_type = indev != NULL ? lv_indev_get_type(indev) : LV_INDEV_TYPE_NONE;
 
-        uint32_t c = *((uint32_t *)lv_event_get_param(e)); /*uint32_t because can be UTF-8*/
+        uint32_t c = lv_event_get_key(e);
         if(c == LV_KEY_RIGHT) {
             if(indev_type == LV_INDEV_TYPE_ENCODER)
                 lv_spinbox_increment(obj);

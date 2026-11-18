@@ -88,6 +88,8 @@ static void __invalidate_flush_cache(const lv_draw_buf_t * draw_buf, const lv_ar
         }
         address += stride;
     }
+
+    HAL_ICACHE_Invalidate();
 }
 
 #endif

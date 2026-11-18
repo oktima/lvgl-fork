@@ -230,7 +230,9 @@ static void gridnav_event_cb(lv_event_t * e)
         else {
             lv_group_t * group = lv_obj_get_group(obj);
             if(group && lv_group_get_focused(group) == obj) {
-                lv_obj_send_event(dsc->focused_obj, LV_EVENT_KEY, &key);
+                /*The LV_EVENT_KEY parameter is `uint32_t[2]`: {key, modifier_keys}*/
+                uint32_t key_data[2] = {key, lv_event_get_modifier_keys(e)};
+                lv_obj_send_event(dsc->focused_obj, LV_EVENT_KEY, key_data);
             }
         }
 

@@ -18,6 +18,12 @@
     #include LV_MEM_POOL_INCLUDE
 #endif
 
+#ifdef STM32H7S7xx
+#define LVGL_WORKMEM_SECTION __attribute__((section("LVGL_WorkMem"))) __attribute__((aligned(4)))
+#else
+#define LVGL_WORKMEM_SECTION
+#endif
+
 /*********************
  *      DEFINES
  *********************/
@@ -144,7 +150,7 @@ void * lv_malloc_core(size_t size)
     void * p = lv_tlsf_malloc(state.tlsf, size);
 
     if(p) {
-        state.cur_used += lv_tlsf_block_size(p);
+        state.cur_used += lv_tlsf_block_size(p) + lv_tlsf_alloc_overhead();
         state.max_used = LV_MAX(state.cur_used, state.max_used);
     }
 
@@ -161,11 +167,15 @@ void * lv_realloc_core(void * p, size_t new_size)
 #endif
 
     size_t old_size = lv_tlsf_block_size(p);
-    void * p_new = lv_tlsf_realloc(state.tlsf, p, new_size);
+    if(old_size > 0) {
+        old_size += lv_tlsf_alloc_overhead();
+        if(state.cur_used > old_size) state.cur_used -= old_size;
+        else state.cur_used = 0;
+    }
 
+    void * p_new = lv_tlsf_realloc(state.tlsf, p, new_size);
     if(p_new) {
-        state.cur_used -= old_size;
-        state.cur_used += lv_tlsf_block_size(p_new);
+        state.cur_used += lv_tlsf_block_size(p_new) + lv_tlsf_alloc_overhead();
         state.max_used = LV_MAX(state.cur_used, state.max_used);
     }
 #if LV_USE_OS
@@ -186,10 +196,15 @@ void lv_free_core(void * p)
 #if LV_MEM_ADD_JUNK
     lv_memset(p, 0xbb, lv_tlsf_block_size(p));
 #endif
+
     size_t size = lv_tlsf_block_size(p);
+    if(size > 0) {
+        size += lv_tlsf_alloc_overhead();
+        if(state.cur_used > size) state.cur_used -= size;
+        else state.cur_used = 0;
+    }
+
     lv_tlsf_free(state.tlsf, p);
-    if(state.cur_used > size) state.cur_used -= size;
-    else state.cur_used = 0;
 
 #if LV_USE_OS
     lv_mutex_unlock(&state.mutex);
@@ -263,6 +278,7 @@ static void lv_mem_walker(void * ptr, size_t size, int used, void * user)
     LV_UNUSED(ptr);
 
     lv_mem_monitor_t * mon_p = user;
+    size += lv_tlsf_alloc_overhead();
     mon_p->total_size += size;
     if(used) {
         mon_p->used_cnt++;

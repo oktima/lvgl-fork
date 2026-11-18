@@ -657,10 +657,11 @@
 #define LV_USE_DRAW_OPENGLES 0
 
 #if LV_USE_DRAW_OPENGLES
-/** Number of textures kept in the cache. More entries mean fewer redraws
+/** Maximum total size in bytes of the textures kept in the cache
+ *  (width * height * 4 per texture). A bigger cache means fewer redraws
  *  but more GPU memory.
  */
-#define LV_DRAW_OPENGLES_TEXTURE_CACHE_COUNT 64
+#define LV_DRAW_OPENGLES_TEXTURE_CACHE_SIZE 16384
 
 #endif /*LV_USE_DRAW_OPENGLES*/
 
@@ -803,6 +804,7 @@
  *  - LV_LOG_LEVEL_INFO: important events
  *  - LV_LOG_LEVEL_WARN: something unwanted happened but caused no problem
  *  - LV_LOG_LEVEL_ERROR: critical issues where the system may fail
+ *  - LV_LOG_LEVEL_FATAL: critical issues that cause the system to panic
  *  - LV_LOG_LEVEL_USER: only logs added by the user
  *  - LV_LOG_LEVEL_NONE: nothing is logged
  */

@@ -80,6 +80,11 @@ static const lv_property_ops_t lv_roller_properties[] = {
         .setter = lv_roller_set_visible_row_count,
         .getter = NULL,
     },
+    {
+        .id = LV_PROPERTY_ROLLER_SELECTED_HIGHLIGHT,
+        .setter = lv_roller_set_selected_highlight,
+        .getter = lv_roller_get_selected_highlight,
+    },
 };
 #endif
 
@@ -241,6 +246,15 @@ void lv_roller_set_visible_row_count(lv_obj_t * obj, uint32_t row_cnt)
     lv_obj_set_height(obj, (lv_font_get_line_height_internal(font) + line_space) * row_cnt + 2 * border_width);
 }
 
+void lv_roller_set_selected_highlight(lv_obj_t * obj, bool en)
+{
+    LV_CHECK_OBJ(obj, MY_CLASS, return);
+
+    lv_roller_t * roller = (lv_roller_t *)obj;
+    roller->selected_highlight = en;
+    lv_obj_invalidate(obj);
+}
+
 /*=====================
  * Getter functions
  *====================*/
@@ -291,6 +305,14 @@ uint32_t lv_roller_get_option_count(const lv_obj_t * obj)
     else {
         return roller->option_cnt;
     }
+}
+
+bool lv_roller_get_selected_highlight(const lv_obj_t * obj)
+{
+    LV_CHECK_OBJ(obj, MY_CLASS, return false);
+
+    lv_roller_t * roller = (lv_roller_t *)obj;
+    return roller->selected_highlight;
 }
 
 #if LV_USE_OBSERVER
@@ -357,6 +379,7 @@ static void lv_roller_constructor(const lv_obj_class_t * class_p, lv_obj_t * obj
     roller->option_cnt = 0;
     roller->sel_opt_id = 0;
     roller->sel_opt_id_ori = 0;
+    roller->selected_highlight = 1;
 
     lv_obj_set_scrollable(obj, false);
     lv_obj_set_scroll_chain_ver(obj, false);
@@ -577,6 +600,11 @@ static void draw_main(lv_event_t * e)
     lv_event_code_t code = lv_event_get_code(e);
     lv_obj_t * obj = lv_event_get_current_target(e);
     LV_ASSERT(obj != NULL);
+    lv_roller_t * roller = (lv_roller_t *)obj;
+
+    /*Without highlighting the label is fully drawn in `draw_label` with the normal style*/
+    if(!roller->selected_highlight) return;
+
     if(code == LV_EVENT_DRAW_MAIN) {
         /*Draw the selected rectangle*/
         lv_layer_t * layer = lv_event_get_layer(e);
@@ -682,6 +710,15 @@ static void draw_label(lv_event_t * e)
     if(!lv_area_intersect(&roller_clip_area, &layer->_clip_area, &roller->coords)) return;
     layer->_clip_area = roller_clip_area;
 
+    /*If the selected option is not highlighted there is no selected area
+     *to leave out, so draw the whole label at once*/
+    if(!((lv_roller_t *)roller)->selected_highlight) {
+        label_draw_dsc.text = lv_label_get_text(label_obj);
+        lv_draw_label(layer, &label_draw_dsc, &label_obj->coords);
+        layer->_clip_area = clip_area_ori;
+        return;
+    }
+
     lv_area_t sel_area;
     get_sel_area(roller, &sel_area);
 
@@ -728,8 +765,9 @@ static void get_sel_area(lv_obj_t * obj, lv_area_t * sel_area)
     lv_area_t roller_coords;
     lv_obj_get_coords(obj, &roller_coords);
 
-    sel_area->x1 = roller_coords.x1;
-    sel_area->x2 = roller_coords.x2;
+    int32_t border_width = lv_obj_get_style_border_width_internal(obj, LV_PART_MAIN);
+    sel_area->x1 = roller_coords.x1 + border_width;
+    sel_area->x2 = roller_coords.x2 - border_width;
 
 }
 

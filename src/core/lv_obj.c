@@ -518,15 +518,11 @@ void lv_obj_set_hidden(lv_obj_t * obj, bool en)
     /*Invalidate when visible again*/
     if(!obj->hidden) lv_obj_invalidate(obj);
 
-    /*Focus the next next item when this one get hidden*/
-    if(obj->hidden && has_state(obj, LV_STATE_FOCUSED)) {
+    /*Prevent a hidden object from maintaining focus: apply the group's refocus policy*/
+    if(obj->hidden) {
         lv_group_t * group = lv_obj_get_group(obj);
-        if(group != NULL) {
-            lv_group_focus_next(group);
-            lv_obj_t * next_obj = lv_group_get_focused(group);
-            if(next_obj != NULL) {
-                lv_obj_invalidate(next_obj);
-            }
+        if(group != NULL && lv_group_get_focused(group) == obj) {
+            lv_group_refocus(group);
         }
     }
 
@@ -1744,6 +1740,9 @@ static void draw_scrollbar(lv_obj_t * obj, lv_layer_t * layer)
 static lv_result_t scrollbar_init_draw_dsc(lv_obj_t * obj, lv_draw_rect_dsc_t * dsc)
 {
     lv_draw_rect_dsc_init(dsc);
+    dsc->base.obj = obj;
+    dsc->base.part = LV_PART_SCROLLBAR;
+
     dsc->bg_opa = lv_obj_get_style_bg_opa_internal(obj, LV_PART_SCROLLBAR);
     if(dsc->bg_opa > LV_OPA_MIN) {
         dsc->bg_color = lv_obj_get_style_bg_color_internal(obj, LV_PART_SCROLLBAR);

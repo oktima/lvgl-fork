@@ -639,7 +639,7 @@
 /** Number of textures kept in the cache. More entries mean fewer redraws
  *  but more GPU memory.
  */
-#define LV_DRAW_OPENGLES_TEXTURE_CACHE_COUNT 64
+#define LV_DRAW_OPENGLES_TEXTURE_CACHE_SIZE (16 * 1024)
 
 #endif /*LV_USE_DRAW_OPENGLES*/
 

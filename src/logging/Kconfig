@@ -16,6 +16,8 @@ choice
 		bool "Warn: something unwanted happened but caused no problem"
 	config LV_LOG_LEVEL_ERROR
 		bool "Error: critical issues where the system may fail"
+	config LV_LOG_LEVEL_FATAL
+		bool "Fatal: critical issues that cause the system to panic"
 	config LV_LOG_LEVEL_USER
 		bool "User: only logs added by the user"
 	config LV_LOG_LEVEL_NONE
@@ -28,12 +30,13 @@ config LV_LOG_LEVEL
 	default 1 if LV_LOG_LEVEL_INFO
 	default 2 if LV_LOG_LEVEL_WARN
 	default 3 if LV_LOG_LEVEL_ERROR
-	default 4 if LV_LOG_LEVEL_USER
-	default 5 if LV_LOG_LEVEL_NONE
+	default 4 if LV_LOG_LEVEL_FATAL
+	default 5 if LV_LOG_LEVEL_USER
+	default 6 if LV_LOG_LEVEL_NONE
 
 config LV_LOG_LEVEL_NUM
 	int
-	default 5
+	default 6
 
 config LV_LOG_PRINTF
 	bool "Print the log with 'printf'"

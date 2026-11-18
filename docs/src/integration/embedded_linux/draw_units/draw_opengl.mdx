@@ -32,7 +32,7 @@ Enable <ApiLink name="LV_USE_DRAW_OPENGLES" />
 
 | Symbol | Default | Meaning |
 |---|---|---|
-| `LV_DRAW_OPENGLES_TEXTURE_CACHE_COUNT` | `64` | Number of textures kept in the cache. More entries mean fewer redraws but more GPU memory. |
+| `LV_DRAW_OPENGLES_TEXTURE_CACHE_SIZE` | `16384` | Maximum total size in bytes of the cached textures (width * height * 4 each). A bigger cache means fewer redraws but more GPU memory. |
 
 ## Limitations
 

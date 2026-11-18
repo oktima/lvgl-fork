@@ -94,6 +94,11 @@ struct _lv_draw_image_dsc_t {
      */
     lv_area_t image_area;
 
+    /** For 9-slice images: the destination area where the slice is drawn, not the corresponding
+     *  region in the source image. Draw units use it to render or cache only that region. See
+     *  `lv_draw_opengles.c` for an example. */
+    lv_area_t real_slice_area;
+
     /**Pointer to an A8 or L8 image descriptor to mask the image with.
      * The mask is always center aligned. */
     const lv_image_dsc_t * bitmap_mask_src;

@@ -42,14 +42,14 @@ static void _g2d_draw_core_cb(lv_draw_task_t * t, const lv_draw_image_dsc_t * dr
 
 static struct g2d_buf * _g2d_handle_src_buf(const lv_draw_buf_t * data);
 
-static void _g2d_set_src_surf(struct g2d_surface * src_surf, struct g2d_buf * buf, const lv_area_t * area,
-                              int32_t stride, lv_color_format_t cf, const lv_draw_image_dsc_t * dsc);
+static void _g2d_set_src_surf(struct g2d_surface * surf, struct g2d_buf * buf, const lv_area_t * area,
+                              const lv_draw_image_dsc_t * dsc, const lv_draw_buf_t * decoded);
 
 static void _g2d_set_tmp_surf(struct g2d_surface * tmp_surf, struct g2d_buf * buf, const lv_area_t * area,
                               lv_color_format_t cf);
 
-static void _g2d_set_dst_surf(struct g2d_surface * dst_surf, struct g2d_buf * buf, const lv_area_t * area,
-                              lv_draw_buf_t * draw_buf);
+static void _g2d_set_dst_surf(struct g2d_surface * surf, struct g2d_buf * buf, const lv_area_t * area,
+                              const lv_draw_buf_t * draw_buf);
 
 /* Blit simple w/ opa and alpha channel */
 static void _g2d_blit(void * handle, struct g2d_surface * dst_surf, struct g2d_surface * src_surf);
@@ -96,54 +96,31 @@ static void _g2d_draw_core_cb(lv_draw_task_t * t, const lv_draw_image_dsc_t * dr
 {
     LV_UNUSED(sup);
     lv_draw_buf_t * draw_buf = t->target_layer->draw_buf;
-
     const lv_draw_buf_t * decoded = decoder_dsc->decoded;
 
     lv_area_t rel_clip_area;
     rel_clip_area = *clipped_img_area;
     lv_area_move(&rel_clip_area, -img_coords->x1, -img_coords->y1);
 
-    lv_area_t rel_img_coords;
-    rel_img_coords = *img_coords;
-    lv_area_move(&rel_img_coords, -img_coords->x1, -img_coords->y1);
-
-    lv_area_t src_area;
-    if(!lv_area_intersect(&src_area, &rel_clip_area, &rel_img_coords))
-        return;
-
-    lv_color_format_t src_cf = draw_dsc->header.cf;
-
-    /* G2D takes stride in pixels. */
-    const uint8_t pixel_size = lv_color_format_get_size(src_cf);
-
-    uint32_t src_stride = draw_dsc->header.stride == 0 ?
-                          lv_color_format_get_size(draw_dsc->header.cf) * draw_dsc->header.w :
-                          draw_dsc->header.stride;
-    LV_ASSERT(pixel_size != 0);
-    src_stride /= pixel_size;
-
-    /* Source image */
-    struct g2d_buf * src_buf = _g2d_handle_src_buf(decoded);
-
-    /* Destination buffer */
-    struct g2d_buf * dst_buf = g2d_search_buf_map(draw_buf->data);
-
-
     void * handle = g2d_get_handle();
 
-    struct g2d_surface src_surf;
+    struct g2d_buf * src_buf = _g2d_handle_src_buf(decoded);
+    struct g2d_buf * dst_buf = g2d_search_buf_map(draw_buf->data);
     struct g2d_surface dst_surf;
-
-    _g2d_set_src_surf(&src_surf, src_buf, &src_area, src_stride, src_cf, draw_dsc);
     _g2d_set_dst_surf(&dst_surf, dst_buf, clipped_img_area, draw_buf);
 
-    bool has_rotation = (draw_dsc->rotation != 0);
+    if(draw_dsc->rotation != 0) {
+        // The following code has not been verified because rotation is not currently supported
 
-    if(has_rotation) {
         /** If the image has rotation, then blit in two steps:
          *   1. Source with rotation to temporary surface.
          *   2. Temporary with other transformations (if any) to destination (frame buffer).
          */
+        lv_area_t src_area;
+        src_area = rel_clip_area;
+        lv_color_format_t src_cf = decoded->header.cf;
+        struct g2d_surface src_surf;
+        _g2d_set_src_surf(&src_surf, src_buf, &src_area, draw_dsc, decoded);
         struct g2d_buf * tmp_buf = g2d_alloc(lv_area_get_width(&src_area) * lv_area_get_height(
                                                  &src_area) *  lv_color_format_get_size(src_cf), 1);
         G2D_ASSERT_MSG(tmp_buf, "Failed to alloc temporary buffer.");
@@ -151,8 +128,40 @@ static void _g2d_draw_core_cb(lv_draw_task_t * t, const lv_draw_image_dsc_t * dr
         _g2d_set_tmp_surf(&tmp_surf, tmp_buf, &src_area, src_cf);
         _g2d_blit_two_steps(handle, &dst_surf, &src_surf, &tmp_surf);
         g2d_free(tmp_buf);
-    }
-    else {
+    } else if(draw_dsc->scale_x != LV_SCALE_NONE || draw_dsc->scale_y != LV_SCALE_NONE) {
+        const lv_image_header_t * header = &decoded->header;
+
+        // Inverse-map rel_clip_area (already clipped to the scaled image bounds
+        // by lv_draw_image_normal_helper) back to source coordinates.
+        // Scaling is applied around the pivot: dst = pivot + (src - pivot) * scale / LV_SCALE_NONE
+        // so the inverse is: src = pivot + (dst - pivot) * LV_SCALE_NONE / scale
+        // Round x1/y1 down and x2/y2 up to avoid missing edge pixels.
+        lv_area_t src_area;
+        src_area = rel_clip_area;
+        lv_area_move(&src_area, -draw_dsc->pivot.x, -draw_dsc->pivot.y);
+        src_area.x1 = (src_area.x1 * LV_SCALE_NONE) / draw_dsc->scale_x;
+        src_area.y1 = (src_area.y1 * LV_SCALE_NONE) / draw_dsc->scale_y;
+        src_area.x2 = ((src_area.x2 * LV_SCALE_NONE) + draw_dsc->scale_x - 1) / draw_dsc->scale_x;
+        src_area.y2 = ((src_area.y2 * LV_SCALE_NONE) + draw_dsc->scale_y - 1) / draw_dsc->scale_y;
+        lv_area_move(&src_area, draw_dsc->pivot.x, draw_dsc->pivot.y);
+
+        // Clamp to source image bounds
+        src_area.x1 = LV_MAX(src_area.x1, 0);
+        src_area.y1 = LV_MAX(src_area.y1, 0);
+        src_area.x2 = LV_MIN(src_area.x2, header->w - 1);
+        src_area.y2 = LV_MIN(src_area.y2, header->h - 1);
+
+        struct g2d_surface src_surf;
+        _g2d_set_src_surf(&src_surf, src_buf, &src_area, draw_dsc, decoded);
+
+        // Single blit: G2D scales src_area -> dst rect in hardware
+        _g2d_blit(handle, &dst_surf, &src_surf);
+    } else {
+        lv_area_t src_area;
+        src_area = rel_clip_area;
+        struct g2d_surface src_surf;
+        _g2d_set_src_surf(&src_surf, src_buf, &src_area, draw_dsc, decoded);
+
         // If rotation is not involved, blit in one step.
         _g2d_blit(handle, &dst_surf, &src_surf);
     }
@@ -173,14 +182,31 @@ static struct g2d_buf * _g2d_handle_src_buf(const lv_draw_buf_t * img_dsc)
     return src_buf;
 }
 
-static void _g2d_set_src_surf(struct g2d_surface * src_surf, struct g2d_buf * buf, const lv_area_t * area,
-                              int32_t stride, lv_color_format_t cf, const lv_draw_image_dsc_t * dsc)
+static void _g2d_set_surf(struct g2d_surface * surf, struct g2d_buf * buf, const lv_area_t * area,
+                          const lv_image_header_t * header)
 {
-    src_surf->format = g2d_get_buf_format(cf);
+    lv_color_format_t cf = header->cf;
+    // G2D takes stride in pixels
+    const uint8_t pixel_size = lv_color_format_get_size(cf); // pixel size in bytes
+    LV_ASSERT(pixel_size != 0);
+    uint32_t stride = header->stride == 0 ? header->w * pixel_size : header->stride; // stride in bytes
+    stride /= pixel_size; // stride in pixels
 
-    int32_t src_w = lv_area_get_width(area);
-    int32_t src_h = lv_area_get_height(area);
+    surf->format = g2d_get_buf_format(cf);
+    surf->planes[0] = buf->buf_paddr;    
+    surf->left   = area->x1;
+    surf->top    = area->y1;
+    surf->right  = area->x1 + lv_area_get_width(area);
+    surf->bottom = area->y1 + lv_area_get_height(area);
+    surf->stride = stride;
+    surf->width  = header->w;
+    surf->height = header->h;
+    surf->clrcolor = g2d_rgba_to_u32(lv_color_black());    
+}
 
+static void _g2d_set_src_surf(struct g2d_surface * surf, struct g2d_buf * buf, const lv_area_t * area,
+                              const lv_draw_image_dsc_t * dsc, const lv_draw_buf_t * decoded)
+{
     bool has_rotation = (dsc->rotation != 0);
     enum g2d_rotation g2d_angle = G2D_ROTATION_0;
 
@@ -203,20 +229,19 @@ static void _g2d_set_src_surf(struct g2d_surface * src_surf, struct g2d_buf * bu
         }
     }
 
-    src_surf->left   = area->x1;
-    src_surf->top    = area->y1;
-    src_surf->right  = area->x1 + src_w;
-    src_surf->bottom = area->y1 + src_h;
-    src_surf->stride = stride;
-    src_surf->width  = src_w;
-    src_surf->height = src_h;
+    _g2d_set_surf(surf, buf, area, &decoded->header);
+    surf->rot = g2d_angle;
+    surf->global_alpha = dsc->opa;
+    surf->blendfunc = G2D_ONE | G2D_PRE_MULTIPLIED_ALPHA;
+}
 
-    src_surf->planes[0] = buf->buf_paddr;
-    src_surf->rot = g2d_angle;
-
-    src_surf->clrcolor = g2d_rgba_to_u32(lv_color_black());
-    src_surf->global_alpha = dsc->opa;
-    src_surf->blendfunc = G2D_ONE | G2D_PRE_MULTIPLIED_ALPHA;
+static void _g2d_set_dst_surf(struct g2d_surface * surf, struct g2d_buf * buf, const lv_area_t * area,
+                              const lv_draw_buf_t * draw_buf)
+{
+    _g2d_set_surf(surf, buf, area, &draw_buf->header);
+    surf->rot = G2D_ROTATION_0;
+    surf->global_alpha = 0xff;
+    surf->blendfunc = G2D_ONE_MINUS_SRC_ALPHA | G2D_PRE_MULTIPLIED_ALPHA;
 }
 
 static void _g2d_set_tmp_surf(struct g2d_surface * tmp_surf, struct g2d_buf * buf, const lv_area_t * area,
@@ -241,35 +266,6 @@ static void _g2d_set_tmp_surf(struct g2d_surface * tmp_surf, struct g2d_buf * bu
     tmp_surf->clrcolor = g2d_rgba_to_u32(lv_color_black());
     tmp_surf->global_alpha = 0x00;
     tmp_surf->blendfunc = G2D_ONE_MINUS_SRC_ALPHA | G2D_PRE_MULTIPLIED_ALPHA;
-}
-
-static void _g2d_set_dst_surf(struct g2d_surface * dst_surf, struct g2d_buf * buf, const lv_area_t * area,
-                              lv_draw_buf_t * draw_buf)
-{
-    int32_t stride = draw_buf->header.stride / (lv_color_format_get_bpp(draw_buf->header.cf) / 8);
-    lv_color_format_t cf = draw_buf->header.cf;
-    uint32_t width = draw_buf->header.w;
-    uint32_t height = draw_buf->header.h;
-
-    int32_t blend_w  = lv_area_get_width(area);
-    int32_t blend_h = lv_area_get_height(area);
-
-    dst_surf->format = g2d_get_buf_format(cf);
-
-    dst_surf->left   = area->x1;
-    dst_surf->top    = area->y1;
-    dst_surf->right  = area->x1 + blend_w;
-    dst_surf->bottom = area->y1 + blend_h;
-    dst_surf->stride = stride;
-    dst_surf->width  = width;
-    dst_surf->height = height;
-
-    dst_surf->planes[0] = buf->buf_paddr;
-    dst_surf->rot = G2D_ROTATION_0;
-
-    dst_surf->clrcolor = g2d_rgba_to_u32(lv_color_black());
-    dst_surf->global_alpha = 0xff;
-    dst_surf->blendfunc = G2D_ONE_MINUS_SRC_ALPHA | G2D_PRE_MULTIPLIED_ALPHA;
 }
 
 static void _g2d_blit(void * handle, struct g2d_surface * dst_surf, struct g2d_surface * src_surf)

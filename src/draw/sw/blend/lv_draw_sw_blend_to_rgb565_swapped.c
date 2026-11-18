@@ -447,8 +447,8 @@ void LV_ATTRIBUTE_FAST_MEM lv_draw_sw_blend_color_to_rgb565_swapped(lv_draw_sw_b
         if(LV_RESULT_INVALID == LV_DRAW_SW_COLOR_BLEND_TO_RGB565_SWAPPED_MIX_MASK_OPA(dsc)) {
             for(y = 0; y < h; y++) {
                 for(x = 0; x < w; x++) {
-                    /*The product can't reach 255, so there is no opaque shortcut here*/
-                    uint32_t a = LV_OPA_MIX2(mask[x], opa);
+                    /*opa < LV_OPA_MAX here, so the result can't reach 255 and there is no opaque shortcut*/
+                    uint32_t a = lv_draw_sw_blend_mix_mask_opa(mask[x], opa);
                     if(a == 0) continue;
                     uint16_t px = lv_color_swap_16(dest_buf_u16[x]); /* Swap destination */
                     LV_COLOR_MIX_16_TO_16_PREPARED(px, fg_prep, px, a); /* Color mix */

@@ -386,7 +386,7 @@ void LV_ATTRIBUTE_FAST_MEM lv_draw_sw_blend_color_to_argb8888(lv_draw_sw_blend_f
             lv_color32_t * dest_buf = dsc->dest_buf;
             for(y = 0; y < h; y++) {
                 for(x = 0; x < w; x++) {
-                    ARGB8888_MASK_FILL_PX(dest_buf[x], LV_OPA_MIX2(mask[x], opa));
+                    ARGB8888_MASK_FILL_PX(dest_buf[x], lv_draw_sw_blend_mix_mask_opa(mask[x], opa));
                 }
                 dest_buf = drawbuf_next_row(dest_buf, dest_stride);
                 mask += mask_stride;

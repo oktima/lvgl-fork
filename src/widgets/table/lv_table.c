@@ -612,7 +612,7 @@ static void lv_table_event(const lv_obj_class_t * class_p, lv_event_t * e)
         lv_obj_invalidate(obj);
     }
     else if(code == LV_EVENT_KEY) {
-        int32_t c = *((int32_t *)lv_event_get_param(e));
+        uint32_t c = lv_event_get_key(e);
         int32_t col = table->col_act;
         int32_t row = table->row_act;
         if(col == LV_TABLE_CELL_NONE || row == LV_TABLE_CELL_NONE) {

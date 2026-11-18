@@ -65,6 +65,7 @@ static lv_result_t add_char(lv_obj_t * obj, uint32_t c);
 static bool add_text(lv_obj_t * obj, const char * txt);
 static void set_cursor_pos_internal(lv_obj_t * obj, int32_t pos);
 static void calc_placeholder_text_size(lv_obj_t * obj);
+static inline bool is_shift_pressed(uint32_t modifier_keys);
 
 /**********************
  *  STATIC VARIABLES
@@ -901,7 +902,9 @@ static void lv_textarea_event(const lv_obj_class_t * class_p, lv_event_t * e)
         start_cursor_blink(obj);
     }
     else if(code == LV_EVENT_KEY) {
-        uint32_t c = *((uint32_t *)lv_event_get_param(e)); /*uint32_t because can be UTF-8*/
+        uint32_t c = lv_event_get_key(e);
+        uint32_t modifier_keys = lv_event_get_modifier_keys(e);
+
         if(c == LV_KEY_RIGHT)
             lv_textarea_cursor_right(obj);
         else if(c == LV_KEY_LEFT)
@@ -918,7 +921,7 @@ static void lv_textarea_event(const lv_obj_class_t * class_p, lv_event_t * e)
             lv_textarea_set_cursor_pos(obj, 0);
         else if(c == LV_KEY_END)
             lv_textarea_set_cursor_pos(obj, LV_TEXTAREA_CURSOR_LAST);
-        else if(c == LV_KEY_ENTER && lv_textarea_get_one_line(obj))
+        else if(c == LV_KEY_ENTER && (lv_textarea_get_one_line(obj) || !is_shift_pressed(modifier_keys)))
             lv_obj_send_event(obj, LV_EVENT_READY, NULL);
         else {
             lv_textarea_add_char(obj, c);
@@ -1112,12 +1115,13 @@ static void refr_cursor_area(lv_obj_t * obj)
     lv_point_t letter_pos;
     lv_label_get_letter_pos(ta->label, cur_pos, &letter_pos);
 
+    int32_t label_width = lv_obj_get_style_width_internal(ta->label, LV_PART_MAIN);
     lv_text_align_t align = lv_obj_calculate_style_text_align_internal(ta->label, LV_PART_MAIN,
                                                                        lv_label_get_text(ta->label));
 
     /*If the cursor is out of the text (most right) draw it to the next line*/
     if(((letter_pos.x + ta->label->coords.x1) + letter_w > ta->label->coords.x2) &&
-       (ta->one_line == 0 && align != LV_TEXT_ALIGN_RIGHT)) {
+       (label_width != LV_SIZE_CONTENT && align != LV_TEXT_ALIGN_RIGHT)) {
 
         letter_pos.x = 0;
         letter_pos.y += letter_h + line_space;
@@ -1588,6 +1592,11 @@ static void calc_placeholder_text_size(lv_obj_t * obj)
     lv_text_get_size_internal(&ta->placeholder_txt_size, ph_dsc.text, ph_dsc.font, ph_dsc.letter_space, ph_dsc.line_space,
                               LV_COORD_MAX,
                               ph_dsc.flag);
+}
+
+static inline bool is_shift_pressed(uint32_t modifier_keys)
+{
+    return (modifier_keys & (LV_KEY_MOD_LSHIFT | LV_KEY_MOD_RSHIFT)) != 0;
 }
 
 #endif

@@ -769,16 +769,16 @@ static void indev_pointer_proc(lv_indev_t * i, lv_indev_data_t * data)
 
     /*Simple sanity check*/
     if(data->point.x < 0) {
-        LV_LOG_WARN("X is %d which is smaller than zero", (int)data->point.x);
+        LV_LOG_TRACE("X is %d which is smaller than zero", (int)data->point.x);
     }
     if(data->point.x >= lv_display_get_horizontal_resolution(i->disp)) {
-        LV_LOG_WARN("X is %d which is greater than hor. res", (int)data->point.x);
+        LV_LOG_TRACE("X is %d which is greater than hor. res", (int)data->point.x);
     }
     if(data->point.y < 0) {
-        LV_LOG_WARN("Y is %d which is smaller than zero", (int)data->point.y);
+        LV_LOG_TRACE("Y is %d which is smaller than zero", (int)data->point.y);
     }
     if(data->point.y >= lv_display_get_vertical_resolution(i->disp)) {
-        LV_LOG_WARN("Y is %d which is greater than ver. res", (int)data->point.y);
+        LV_LOG_TRACE("Y is %d which is greater than ver. res", (int)data->point.y);
     }
 
     /*Move the cursor if set and moved*/
@@ -889,7 +889,7 @@ static void indev_keypad_proc(lv_indev_t * i, lv_indev_data_t * data)
             /*Simulate a press on the object if ENTER was pressed*/
             if(data->key == LV_KEY_ENTER) {
                 /*Send the ENTER as a normal KEY*/
-                if(lv_group_send_data(g, LV_KEY_ENTER) == LV_RESULT_INVALID) return;
+                if(lv_group_send_data(g, LV_KEY_ENTER, data->modifier_keys) == LV_RESULT_INVALID) return;
                 if(indev_reset_check(i)) return;
 
                 if(send_event(LV_EVENT_PRESSED, indev_act) == LV_RESULT_INVALID) return;
@@ -897,14 +897,14 @@ static void indev_keypad_proc(lv_indev_t * i, lv_indev_data_t * data)
             }
             else if(data->key == LV_KEY_ESC) {
                 /*Send the ESC as a normal KEY*/
-                if(lv_group_send_data(g, LV_KEY_ESC) == LV_RESULT_INVALID) return;
+                if(lv_group_send_data(g, LV_KEY_ESC, data->modifier_keys) == LV_RESULT_INVALID) return;
                 if(indev_reset_check(i)) return;
 
                 if(send_event(LV_EVENT_CANCEL, indev_act) == LV_RESULT_INVALID) return;
             }
             /*Just send other keys to the object (e.g. 'A' or `LV_GROUP_KEY_RIGHT`)*/
             else {
-                if(lv_group_send_data(g, data->key) == LV_RESULT_INVALID) return;
+                if(lv_group_send_data(g, data->key, data->modifier_keys) == LV_RESULT_INVALID) return;
                 if(indev_reset_check(i)) return;
             }
         }
@@ -949,7 +949,7 @@ static void indev_keypad_proc(lv_indev_t * i, lv_indev_data_t * data)
             }
             /*Just send other keys again to the object (e.g. 'A' or `LV_GROUP_KEY_RIGHT)*/
             else {
-                lv_group_send_data(g, data->key);
+                lv_group_send_data(g, data->key, data->modifier_keys);
                 if(indev_reset_check(i)) return;
             }
         }
@@ -1042,7 +1042,7 @@ static void indev_encoder_proc(lv_indev_t * i, lv_indev_data_t * data)
         }
         else if(data->key == LV_KEY_ESC) {
             /*Send the ESC as a normal KEY*/
-            lv_group_send_data(g, LV_KEY_ESC);
+            lv_group_send_data(g, LV_KEY_ESC, data->modifier_keys);
             if(indev_reset_check(i)) return;
 
             if(is_enabled) {
@@ -1051,7 +1051,7 @@ static void indev_encoder_proc(lv_indev_t * i, lv_indev_data_t * data)
         }
         /*Just send other keys to the object (e.g. 'A' or `LV_GROUP_KEY_RIGHT`)*/
         else {
-            lv_group_send_data(g, data->key);
+            lv_group_send_data(g, data->key, data->modifier_keys);
             if(indev_reset_check(i)) return;
         }
     }
@@ -1110,7 +1110,7 @@ static void indev_encoder_proc(lv_indev_t * i, lv_indev_data_t * data)
                 data->enc_diff++;
             }
             else {
-                lv_group_send_data(g, data->key);
+                lv_group_send_data(g, data->key, data->modifier_keys);
                 if(indev_reset_check(i)) return;
             }
 
@@ -1150,7 +1150,7 @@ static void indev_encoder_proc(lv_indev_t * i, lv_indev_data_t * data)
                         if(send_event(LV_EVENT_CLICKED, indev_act) == LV_RESULT_INVALID) return;
                     }
 
-                    lv_group_send_data(g, LV_KEY_ENTER);
+                    lv_group_send_data(g, LV_KEY_ENTER, data->modifier_keys);
                     if(indev_reset_check(i)) return;
                 }
                 else {
@@ -1178,13 +1178,13 @@ static void indev_encoder_proc(lv_indev_t * i, lv_indev_data_t * data)
             int32_t s;
             if(data->enc_diff < 0) {
                 for(s = 0; s < -data->enc_diff; s++) {
-                    lv_group_send_data(g, LV_KEY_LEFT);
+                    lv_group_send_data(g, LV_KEY_LEFT, data->modifier_keys);
                     if(indev_reset_check(i)) return;
                 }
             }
             else if(data->enc_diff > 0) {
                 for(s = 0; s < data->enc_diff; s++) {
-                    lv_group_send_data(g, LV_KEY_RIGHT);
+                    lv_group_send_data(g, LV_KEY_RIGHT, data->modifier_keys);
                     if(indev_reset_check(i)) return;
                 }
             }

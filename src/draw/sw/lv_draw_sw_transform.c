@@ -371,13 +371,20 @@ static inline uint32_t LV_ATTRIBUTE_FAST_MEM transform_alpha_weights(uint32_t a0
                                                                      uint32_t fx, uint32_t fy, uint32_t * t)
 {
     uint32_t ifx = 256 - fx;
-    uint32_t ify = 256 - fy;
+
+    /*Derive the four weights from one product so they add up to exactly 256. Truncating
+     *each product on its own loses up to 3, and an opaque neighborhood would come out
+     *with an alpha of 254, which drops a level when blended to RGB565*/
+    uint32_t w11 = (fx * fy) >> 8;
+    uint32_t w01 = fx - w11;
+    uint32_t w10 = fy - w11;
+    uint32_t w00 = ifx - w10;
 
     /*Scale each alpha to 0..256 so an opaque neighbor keeps its full weight*/
-    uint32_t u00 = (((ifx * ify) >> 8) * (a00 + (a00 >> 7))) >> 8;
-    uint32_t u01 = (((fx * ify) >> 8) * (a01 + (a01 >> 7))) >> 8;
-    uint32_t u10 = (((ifx * fy) >> 8) * (a10 + (a10 >> 7))) >> 8;
-    uint32_t u11 = (((fx * fy) >> 8) * (a11 + (a11 >> 7))) >> 8;
+    uint32_t u00 = (w00 * (a00 + (a00 >> 7))) >> 8;
+    uint32_t u01 = (w01 * (a01 + (a01 >> 7))) >> 8;
+    uint32_t u10 = (w10 * (a10 + (a10 >> 7))) >> 8;
+    uint32_t u11 = (w11 * (a11 + (a11 >> 7))) >> 8;
 
     uint32_t sum = u00 + u01 + u10 + u11;
     if(sum == 0) {
@@ -452,13 +459,20 @@ static inline uint32_t LV_ATTRIBUTE_FAST_MEM argb8888_bilinear_premul(uint32_t p
                                                                       uint32_t fx, uint32_t fy)
 {
     uint32_t ifx = 256 - fx;
-    uint32_t ify = 256 - fy;
 
     uint32_t a00 = p00 >> 24, a01 = p01 >> 24, a10 = p10 >> 24, a11 = p11 >> 24;
-    uint32_t u00 = (((ifx * ify) >> 8) * (a00 + (a00 >> 7))) >> 8;
-    uint32_t u01 = (((fx * ify) >> 8) * (a01 + (a01 >> 7))) >> 8;
-    uint32_t u10 = (((ifx * fy) >> 8) * (a10 + (a10 >> 7))) >> 8;
-    uint32_t u11 = (((fx * fy) >> 8) * (a11 + (a11 >> 7))) >> 8;
+    /*Derive the four weights from one product so they add up to exactly 256. Truncating
+     *each product on its own loses up to 3, and an opaque neighborhood would come out
+     *with an alpha of 254, which drops a level when blended to RGB565*/
+    uint32_t w11 = (fx * fy) >> 8;
+    uint32_t w01 = fx - w11;
+    uint32_t w10 = fy - w11;
+    uint32_t w00 = ifx - w10;
+
+    uint32_t u00 = (w00 * (a00 + (a00 >> 7))) >> 8;
+    uint32_t u01 = (w01 * (a01 + (a01 >> 7))) >> 8;
+    uint32_t u10 = (w10 * (a10 + (a10 >> 7))) >> 8;
+    uint32_t u11 = (w11 * (a11 + (a11 >> 7))) >> 8;
 
     uint32_t rb = (p00 & 0x00FF00FF) * u00 + (p01 & 0x00FF00FF) * u01
                   + (p10 & 0x00FF00FF) * u10 + (p11 & 0x00FF00FF) * u11;
@@ -892,21 +906,22 @@ static void transform_argb8888_premultiplied(const uint8_t * src, int32_t src_w,
             px_hor = unpremultiply(px_hor);
             px_ver = unpremultiply(px_ver);
 
+            /*The alpha weights sum to 0x100 to match the >> 8, so two opaque pixels stay opaque*/
             if(px_ver.alpha == 0) {
-                dest_c32[x].alpha = (dest_c32[x].alpha * (0xFF - ys_fract)) >> 8;
+                dest_c32[x].alpha = (dest_c32[x].alpha * (0x100 - ys_fract)) >> 8;
 
             }
             else if(!lv_color32_eq(dest_c32[x], px_ver)) {
-                if(dest_c32[x].alpha) dest_c32[x].alpha = ((px_ver.alpha * ys_fract) + (dest_c32[x].alpha * (0xFF - ys_fract))) >> 8;
+                if(dest_c32[x].alpha) dest_c32[x].alpha = ((px_ver.alpha * ys_fract) + (dest_c32[x].alpha * (0x100 - ys_fract))) >> 8;
                 px_ver.alpha = ys_fract;
                 dest_c32[x] = lv_color_mix32_inlined(px_ver, dest_c32[x]);
             }
 
             if(px_hor.alpha == 0) {
-                dest_c32[x].alpha = (dest_c32[x].alpha * (0xFF - xs_fract)) >> 8;
+                dest_c32[x].alpha = (dest_c32[x].alpha * (0x100 - xs_fract)) >> 8;
             }
             else if(!lv_color32_eq(dest_c32[x], px_hor)) {
-                if(dest_c32[x].alpha) dest_c32[x].alpha = ((px_hor.alpha * xs_fract) + (dest_c32[x].alpha * (0xFF - xs_fract))) >> 8;
+                if(dest_c32[x].alpha) dest_c32[x].alpha = ((px_hor.alpha * xs_fract) + (dest_c32[x].alpha * (0x100 - xs_fract))) >> 8;
                 px_hor.alpha = xs_fract;
                 dest_c32[x] = lv_color_mix32_inlined(px_hor, dest_c32[x]);
             }

@@ -11,6 +11,8 @@
 
 #if LV_USE_SDL
 
+#include "../../indev/lv_indev_private.h"
+
 /*********************
  *      DEFINES
  *********************/
@@ -141,6 +143,14 @@ void lv_sdl_mouse_handler(SDL_Event * event)
     if(indev == NULL) return;
     lv_sdl_mouse_t * indev_dev = lv_indev_get_driver_data(indev);
     if(indev_dev == NULL) return;
+
+    // prevent pointer position to be updated when the indev is disabled
+    // we reset the state to released to avoid the pointer to be stuck in pressed state
+    if(indev->enabled == 0) {
+        indev_dev->left_button_down = false;
+        lv_indev_read(indev);
+        return;
+    }
 
     int32_t hor_res = lv_display_get_horizontal_resolution(disp);
     int32_t ver_res = lv_display_get_vertical_resolution(disp);

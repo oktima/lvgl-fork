@@ -268,6 +268,17 @@ struct wl_surface * lv_wayland_get_window_surface(lv_display_t * display);
  * GLOBAL PROTOTYPES
  **********************/
 
+/* Oktima: restrict display creation to a single backend (see lv_wayland_backend.c) */
+#if LV_WAYLAND_USE_G2D
+void lv_wayland_set_g2d_backend_ops(void);
+#endif
+#if LV_WAYLAND_USE_EGL
+void lv_wayland_set_egl_backend_ops(void);
+#endif
+#if LV_WAYLAND_USE_SHM
+void lv_wayland_set_shm_backend_ops(void);
+#endif
+
 /**********************
  *      MACROS
  **********************/

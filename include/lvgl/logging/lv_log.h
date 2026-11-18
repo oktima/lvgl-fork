@@ -26,6 +26,7 @@ LV_EXPORT_CONST_INT(LV_LOG_LEVEL_TRACE);
 LV_EXPORT_CONST_INT(LV_LOG_LEVEL_INFO);
 LV_EXPORT_CONST_INT(LV_LOG_LEVEL_WARN);
 LV_EXPORT_CONST_INT(LV_LOG_LEVEL_ERROR);
+LV_EXPORT_CONST_INT(LV_LOG_LEVEL_FATAL);
 LV_EXPORT_CONST_INT(LV_LOG_LEVEL_USER);
 LV_EXPORT_CONST_INT(LV_LOG_LEVEL_NONE);
 
@@ -136,6 +137,14 @@ void lv_log_add(lv_log_level_t level, const char * file, int line,
 #  endif
 #endif
 
+#ifndef LV_LOG_FATAL
+#  if LV_LOG_LEVEL <= LV_LOG_LEVEL_FATAL
+#    define LV_LOG_FATAL(...) lv_log_add(LV_LOG_LEVEL_FATAL, LV_LOG_FILE, LV_LOG_LINE, __func__, __VA_ARGS__)
+#  else
+#    define LV_LOG_FATAL(...) do {}while(0)
+#  endif
+#endif
+
 #ifndef LV_LOG_USER
 #  if LV_LOG_LEVEL <= LV_LOG_LEVEL_USER
 #    define LV_LOG_USER(...) lv_log_add(LV_LOG_LEVEL_USER, LV_LOG_FILE, LV_LOG_LINE, __func__, __VA_ARGS__)
@@ -163,6 +172,7 @@ void lv_log_add(lv_log_level_t level, const char * file, int line,
 #define LV_LOG_WARN(...) do {}while(0)
 #define LV_LOG_WARN_ONCE(...) do {}while(0)
 #define LV_LOG_ERROR(...) do {}while(0)
+#define LV_LOG_FATAL(...) do {}while(0)
 #define LV_LOG_USER(...) do {}while(0)
 #define LV_LOG(...) do {}while(0)
 

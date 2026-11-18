@@ -43,6 +43,7 @@ enum _lv_property_roller_id_t {
     LV_PROPERTY_ID2(ROLLER, OPTIONS,            LV_PROPERTY_TYPE_TEXT,  LV_PROPERTY_TYPE_INT,   0),
     LV_PROPERTY_ID2(ROLLER, SELECTED,           LV_PROPERTY_TYPE_INT,   LV_PROPERTY_TYPE_INT, 1),
     LV_PROPERTY_ID(ROLLER, VISIBLE_ROW_COUNT,   LV_PROPERTY_TYPE_INT,   2),
+    LV_PROPERTY_ID(ROLLER, SELECTED_HIGHLIGHT,  LV_PROPERTY_TYPE_INT,   3),
     LV_PROPERTY_ROLLER_END,
 };
 #endif
@@ -111,6 +112,13 @@ bool lv_roller_set_selected_str(lv_obj_t * obj, const char * sel_opt, lv_anim_en
  */
 void lv_roller_set_visible_row_count(lv_obj_t * obj, uint32_t row_cnt);
 
+/**
+ * Set whether the selected option should be highlighted or not
+ * @param obj       pointer to a roller object
+ * @param en        true: highlight enabled; false: disabled
+ */
+void lv_roller_set_selected_highlight(lv_obj_t * obj, bool en);
+
 /*=====================
  * Getter functions
  *====================*/
@@ -153,6 +161,13 @@ uint32_t lv_roller_get_option_count(const lv_obj_t * obj);
  * @return          LV_RESULT_OK if option found
  */
 lv_result_t lv_roller_get_option_str(const lv_obj_t * obj, uint32_t option, char * buf, uint32_t buf_size);
+
+/**
+ * Get whether the selected option should be highlighted or not
+ * @param obj       pointer to a roller object
+ * @return          true: highlight enabled; false: disabled
+ */
+bool lv_roller_get_selected_highlight(const lv_obj_t * obj);
 
 #if LV_USE_OBSERVER
 /**

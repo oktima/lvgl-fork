@@ -87,6 +87,26 @@ void * lv_draw_create_unit(size_t size)
     return new_unit;
 }
 
+void lv_draw_remove_unit(lv_draw_unit_t * unit)
+{
+    if(unit == NULL) return;
+
+    if(_draw_info.unit_head == unit) {
+        _draw_info.unit_head = unit->next;
+    }
+    else {
+        lv_draw_unit_t * prev = _draw_info.unit_head;
+        while(prev && prev->next != unit) prev = prev->next;
+        if(prev == NULL) return; /* unit not found in the list */
+        prev->next = unit->next;
+    }
+
+    _draw_info.unit_cnt--;
+
+    if(unit->delete_cb) unit->delete_cb(unit);
+    lv_free(unit);
+}
+
 lv_draw_task_t * lv_draw_add_task(lv_layer_t * layer, const lv_area_t * coords, lv_draw_task_type_t type)
 {
     LV_CHECK_ARG(layer != NULL, return NULL);

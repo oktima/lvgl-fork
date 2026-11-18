@@ -279,6 +279,10 @@ static void lv_windows_display_timer_callback(lv_timer_t * timer)
              * explicit invalidation */
             lv_obj_invalidate(lv_display_get_screen_active(
                                   context->display_device_object));
+
+            /* Oktima: always request a refresh as well (e.g. if the area was
+             * already invalidated), see https://github.com/lvgl/lvgl/issues/8071 */
+            lv_display_send_event(context->display_device_object, LV_EVENT_REFR_REQUEST, NULL);
         }
     }
 

@@ -32,6 +32,7 @@ extern "C" {
 
 void lv_draw_opengles_init(void);
 void lv_draw_opengles_deinit(void);
+size_t lv_draw_opengles_get_texture_cache_size(void);
 
 /**
  * Clear a region of the GPU texture that backs the given layer.

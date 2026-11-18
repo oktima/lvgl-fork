@@ -138,6 +138,13 @@ const lv_area_t * lv_event_get_old_size(lv_event_t * e);
 uint32_t lv_event_get_key(lv_event_t * e);
 
 /**
+ * Get the modifier keys passed as parameter to an event. Can be used in `LV_EVENT_KEY`
+ * @param e     pointer to an event
+ * @return      the modifier keys or NULL if called on an unrelated event
+ */
+uint32_t lv_event_get_modifier_keys(lv_event_t * e);
+
+/**
  * Get the signed rotary encoder diff. passed as parameter to an event. Can be used in `LV_EVENT_ROTARY`
  * @param e     pointer to an event
  * @return      the triggering key or NULL if called on an unrelated event

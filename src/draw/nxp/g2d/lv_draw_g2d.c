@@ -74,6 +74,7 @@ static void _g2d_execute_drawing(lv_draw_task_t * t);
 
 static int32_t is_hw_pxp = 0;
 static bool init_successful = false;
+static lv_draw_g2d_unit_t * g_unit = NULL;
 
 /**********************
  *      MACROS
@@ -85,8 +86,23 @@ static bool init_successful = false;
 
 void lv_draw_g2d_init(void)
 {
+    /* Can be called by the application (e.g. before creating a Wayland G2D window),
+     * so make it idempotent */
+    if(init_successful) return;
+
+    g2d_create_buf_map();
+    void * handle;
+    int ret = g2d_open(&handle);
+    if(ret != 0) {
+        LV_LOG_ERROR("Cannot open G2D handle");
+        g2d_free_buf_map();
+        return;
+    }
+    g2d_query_hardware(handle, G2D_HARDWARE_PXP_V1, &is_hw_pxp);
+    g2d_set_handle(handle);
+
     lv_draw_buf_g2d_init_handlers();
-#if LV_USE_DRAW_G2D
+
     lv_draw_g2d_unit_t * draw_g2d_unit = lv_draw_create_unit(sizeof(lv_draw_g2d_unit_t));
     draw_g2d_unit->base_unit.evaluate_cb = _g2d_evaluate;
     draw_g2d_unit->base_unit.dispatch_cb = _g2d_dispatch;
@@ -104,22 +120,25 @@ void lv_draw_g2d_init(void)
     lv_thread_init(&thread_dsc->thread, "g2ddraw", LV_DRAW_THREAD_PRIO, _g2d_render_thread_cb, LV_DRAW_THREAD_STACK_SIZE,
                    thread_dsc);
 #endif
-#endif
-    g2d_create_buf_map();
-    void * handle;
-    int ret = g2d_open(&handle);
-    if(ret != 0) {
-        LV_LOG_ERROR("Cannot open G2D handle");
-        return;
-    }
-    g2d_query_hardware(handle, G2D_HARDWARE_PXP_V1, &is_hw_pxp);
-    g2d_set_handle(handle);
+
+    g_unit = draw_g2d_unit;
     init_successful = true;
 }
 
 void lv_draw_g2d_deinit(void)
 {
+    if(!init_successful) return;
+
+    if(g_unit) {
+        lv_draw_remove_unit((lv_draw_unit_t *)g_unit);
+        g_unit = NULL;
+    }
+
+    g2d_close(g2d_get_handle());
+    g2d_set_handle(NULL);
     g2d_free_buf_map();
+    lv_draw_buf_g2d_deinit_handlers();
+
     init_successful = false;
 }
 
@@ -148,7 +167,6 @@ static inline bool _g2d_dest_cf_supported(lv_color_format_t cf)
     return is_cf_supported;
 }
 
-#if 0
 static inline bool _g2d_src_cf_supported(lv_color_format_t cf)
 {
     bool is_cf_supported = false;
@@ -184,7 +202,6 @@ static bool _g2d_draw_img_supported(const lv_draw_image_dsc_t * draw_dsc)
 
     return true;
 }
-#endif
 
 static int32_t _g2d_evaluate(lv_draw_unit_t * u, lv_draw_task_t * t)
 {
@@ -217,9 +234,6 @@ static int32_t _g2d_evaluate(lv_draw_unit_t * u, lv_draw_task_t * t)
                 return 1;
             }
         case LV_DRAW_TASK_TYPE_IMAGE: {
-                /* TODO: Fix issue where images rendered to a different layer don't render in the final layer.*/
-                return 0;
-#if 0
                 const lv_draw_image_dsc_t * draw_dsc = (lv_draw_image_dsc_t *) t->draw_dsc;
 
                 if(!_g2d_src_cf_supported(draw_dsc->header.cf))
@@ -233,7 +247,6 @@ static int32_t _g2d_evaluate(lv_draw_unit_t * u, lv_draw_task_t * t)
                     t->preferred_draw_unit_id = DRAW_UNIT_ID_G2D;
                 }
                 return 1;
-#endif
             }
         default:
             return 0;
@@ -297,10 +310,10 @@ static int32_t _g2d_delete(lv_draw_unit_t * draw_unit)
 {
     lv_result_t res = LV_RESULT_OK;
 
-#if !LV_USE_G2D_DRAW_THREAD
-    LV_UNUSED(draw_unit);
-#else
+#if LV_USE_DRAW_G2D
     lv_draw_g2d_unit_t * draw_g2d_unit = (lv_draw_g2d_unit_t *) draw_unit;
+
+#if LV_USE_G2D_DRAW_THREAD
     lv_draw_sw_thread_dsc_t * thread_dsc = &draw_g2d_unit->thread_dsc;
     LV_LOG_INFO("Cancel G2D draw thread.");
     thread_dsc->exit_status = true;
@@ -310,7 +323,11 @@ static int32_t _g2d_delete(lv_draw_unit_t * draw_unit)
     lv_thread_sync_delete(&thread_dsc->new_task_sync);
     lv_thread_sync_delete(&thread_dsc->task_done_sync);
 #endif
-    g2d_close(g2d_get_handle());
+
+    if(draw_g2d_unit == g_unit) {
+        g_unit = NULL;
+    }
+#endif
 
     return res;
 }

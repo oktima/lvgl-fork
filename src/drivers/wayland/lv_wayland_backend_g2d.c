@@ -59,6 +59,7 @@ typedef struct {
 
 typedef struct {
     struct zwp_linux_dmabuf_v1 * handler;
+    struct zwp_linux_dmabuf_feedback_v1 * feedback;
     /* XRBG888 and ARGB8888 are always supported*/
     bool supports_rgb565;
 } lv_wl_g2d_ctx_t;
@@ -183,6 +184,16 @@ static const struct wl_callback_listener frame_listener = {
 
 static lv_result_t wl_g2d_init(void ** backend_data)
 {
+    /* The G2D buffers are allocated through libg2d, which must have been opened
+     * by lv_draw_g2d_init() first. That is not done by lv_init() but by the
+     * application, once libg2d is known to be available, so mark this backend as
+     * unavailable if G2D is not up and let the next backend be used instead. */
+    if(g2d_get_handle() == NULL) {
+        LV_LOG_INFO("G2D is not initialized, the G2D wayland backend will not be used");
+        *backend_data = NULL;
+        return LV_RESULT_INVALID;
+    }
+
     lv_memset(&ctx, 0, sizeof(ctx));
     *backend_data = &ctx;
     return LV_RESULT_OK;
@@ -193,6 +204,10 @@ static void wl_g2d_deinit(void * backend_ctx)
     lv_wl_g2d_ctx_t * ctx = (lv_wl_g2d_ctx_t *)backend_ctx;
     if(!ctx) {
         return;
+    }
+    if(ctx->feedback) {
+        zwp_linux_dmabuf_feedback_v1_destroy(ctx->feedback);
+        ctx->feedback = NULL;
     }
     if(ctx->handler) {
         zwp_linux_dmabuf_v1_destroy(ctx->handler);
@@ -212,8 +227,8 @@ static void wl_g2d_global_handler(void * backend_ctx, struct wl_registry * regis
         ctx->handler = wl_registry_bind(registry, name, &zwp_linux_dmabuf_v1_interface, version);
 
         if(version >= 4) {
-            struct zwp_linux_dmabuf_feedback_v1 * feedback = zwp_linux_dmabuf_v1_get_default_feedback(ctx->handler);
-            zwp_linux_dmabuf_feedback_v1_add_listener(feedback, &dmabuf_listener_v5, ctx);
+            ctx->feedback = zwp_linux_dmabuf_v1_get_default_feedback(ctx->handler);
+            zwp_linux_dmabuf_feedback_v1_add_listener(ctx->feedback, &dmabuf_listener_v5, ctx);
         }
         else if(version < 3) {
             zwp_linux_dmabuf_v1_add_listener(ctx->handler, &dmabuf_listener, ctx);

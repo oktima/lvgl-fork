@@ -94,7 +94,7 @@ void lv_log_add(lv_log_level_t level, const char * file, int line, const char * 
 #if LV_LOG_USE_TIMESTAMP
         uint32_t t = lv_tick_get();
 #endif
-        static const char * lvl_prefix[] = {"Trace", "Info", "Warn", "Error", "User"};
+        static const char * lvl_prefix[] = {"Trace", "Info", "Warn", "Error", "Fatal", "User"};
 
         if(custom_print_cb) {
             char buf[512];

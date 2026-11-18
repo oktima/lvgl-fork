@@ -219,6 +219,12 @@ void lv_draw_deinit(void);
 void * lv_draw_create_unit(size_t size);
 
 /**
+ * Remove a draw unit from the list of draw units
+ * @param unit      pointer to the draw unit to remove
+ */
+void lv_draw_remove_unit(lv_draw_unit_t * unit);
+
+/**
  * Add an empty draw task to the draw task list of a layer.
  * @param layer     pointer to a layer
  * @param coords    the coordinates of the draw task

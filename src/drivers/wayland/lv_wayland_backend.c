@@ -84,6 +84,11 @@ static struct {
 
 static const size_t backend_count = (sizeof(backends) / sizeof(backends[0]));
 
+/* Oktima: backend explicitly selected by the application with one of the
+ * lv_wayland_set_*_backend_ops() functions. When set, only this backend is
+ * used to initialize displays, otherwise all backends are tried in order. */
+static const lv_wayland_backend_ops_t * selected_ops = NULL;
+
 /**********************
  *      MACROS
  **********************/
@@ -91,6 +96,31 @@ static const size_t backend_count = (sizeof(backends) / sizeof(backends[0]));
 /**********************
  *   GLOBAL FUNCTIONS
  **********************/
+
+/* Oktima: kept for compatibility with applications that select the backend
+ * themselves before calling lv_wayland_window_create() and fall back to the
+ * next one if the window creation fails (initializing the matching draw unit
+ * only for the selected backend). */
+#if LV_WAYLAND_USE_G2D
+void lv_wayland_set_g2d_backend_ops(void)
+{
+    selected_ops = &wl_g2d_ops;
+}
+#endif /*LV_WAYLAND_USE_G2D*/
+
+#if LV_WAYLAND_USE_EGL
+void lv_wayland_set_egl_backend_ops(void)
+{
+    selected_ops = &wl_egl_ops;
+}
+#endif /*LV_WAYLAND_USE_EGL*/
+
+#if LV_WAYLAND_USE_SHM
+void lv_wayland_set_shm_backend_ops(void)
+{
+    selected_ops = &wl_shm_ops;
+}
+#endif /*LV_WAYLAND_USE_SHM*/
 
 void lv_wayland_backend_init_all(void)
 {
@@ -144,6 +174,9 @@ lv_result_t lv_wayland_backend_init_display(lv_wayland_backend_display_data_t * 
 
     for(size_t i = 0; i < backend_count; ++i) {
         if(!backends[i].available) {
+            continue;
+        }
+        if(selected_ops && backends[i].ops != selected_ops) {
             continue;
         }
 

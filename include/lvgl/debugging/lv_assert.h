@@ -43,7 +43,7 @@ extern "C" {
 #define LV_ASSERT_INTERNAL(expr, msg)                                                   \
     do {                                                                                \
         if(!(expr)) {                                                                   \
-            LV_LOG_ERROR("Assertion `%s` failed." msg, #expr);                         \
+            LV_LOG_FATAL("Assertion `%s` failed." msg, #expr);                         \
             LV_ASSERT_HANDLER                                                           \
         }                                                                               \
     } while(0)
@@ -51,7 +51,7 @@ extern "C" {
 #define LV_ASSERT_FORMAT_INTERNAL(expr, format, ...)                                    \
     do {                                                                                \
         if(!(expr)) {                                                                   \
-            LV_LOG_ERROR("Assertion `%s` failed." format, #expr, __VA_ARGS__);          \
+            LV_LOG_FATAL("Assertion `%s` failed." format, #expr, __VA_ARGS__);          \
             LV_ASSERT_HANDLER                                                           \
         }                                                                               \
     } while(0)

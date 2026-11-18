@@ -52,10 +52,11 @@ void lv_draw_nema_gfx_line(lv_draw_task_t * t, const lv_draw_line_dsc_t * dsc)
 
     lv_layer_t * layer = t->target_layer;
     lv_area_t clip_area;
-    clip_area.x1 = LV_MIN(dsc->p1.x, dsc->p2.x) - dsc->width / 2;
-    clip_area.x2 = LV_MAX(dsc->p1.x, dsc->p2.x) + dsc->width / 2;
-    clip_area.y1 = LV_MIN(dsc->p1.y, dsc->p2.y) - dsc->width / 2;
-    clip_area.y2 = LV_MAX(dsc->p1.y, dsc->p2.y) + dsc->width / 2;
+    /*The antialiased edge of the line reaches up to 1 px past its width*/
+    clip_area.x1 = LV_MIN(dsc->p1.x, dsc->p2.x) - dsc->width / 2 - 1;
+    clip_area.x2 = LV_MAX(dsc->p1.x, dsc->p2.x) + dsc->width / 2 + 1;
+    clip_area.y1 = LV_MIN(dsc->p1.y, dsc->p2.y) - dsc->width / 2 - 1;
+    clip_area.y2 = LV_MAX(dsc->p1.y, dsc->p2.y) + dsc->width / 2 + 1;
 
     if(!lv_area_intersect(&clip_area, &clip_area, &t->clip_area))
         return; /*Fully clipped, nothing to do*/
@@ -88,7 +89,9 @@ void lv_draw_nema_gfx_line(lv_draw_task_t * t, const lv_draw_line_dsc_t * dsc)
         nema_set_blend_fill(NEMA_BL_SRC);
     }
 
-    nema_draw_line_aa(point1.x, point1.y, point2.x, point2.y, dsc->width, bg_color);
+    /*Odd widths centered on the middle of the pixel, as the software renderer draws them*/
+    float offset = (dsc->width & 1) ? 0.5f : 0.0f;
+    nema_draw_line_aa(point1.x + offset, point1.y + offset, point2.x + offset, point2.y + offset, dsc->width, bg_color);
 
     nema_cl_submit(&(draw_nema_gfx_unit->cl));
 

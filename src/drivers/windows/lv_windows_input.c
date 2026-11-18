@@ -19,6 +19,7 @@
 #include "lv_windows_input_private.h"
 #include "../../misc/lv_text_private.h"
 #include "../../core/lv_obj_private.h"
+#include "../../indev/lv_indev_private.h"
 
 #include <windowsx.h>
 
@@ -296,114 +297,119 @@ bool lv_windows_pointer_device_window_message_handler(
     LPARAM lParam,
     LRESULT * plResult)
 {
-    switch(uMsg) {
+    lv_windows_window_context_t * context = NULL;
+
+    if (uMsg == WM_MOUSEMOVE || uMsg == WM_LBUTTONDOWN || uMsg == WM_LBUTTONUP || uMsg == WM_TOUCH) {
+        context = (lv_windows_window_context_t *)(lv_windows_get_window_context(hWnd));
+
+        if (!context) {
+            *plResult = 0;
+            return true;
+        }
+
+        // prevent pointer position to be updated when the indev is disabled
+        // we reset the state to released to avoid the pointer to be stuck in pressed state
+        if (context->pointer.indev && context->pointer.indev->enabled == 0) {
+            context->pointer.state = LV_INDEV_STATE_RELEASED;
+            *plResult = 0;
+            return true;
+        }
+    }
+
+    switch(uMsg){
         case WM_MOUSEMOVE: {
-                lv_windows_window_context_t * context = (lv_windows_window_context_t *)(
-                                                            lv_windows_get_window_context(hWnd));
-                if(context) {
-                    int32_t hor_res = lv_display_get_horizontal_resolution(
-                                          context->display_device_object);
-                    int32_t ver_res = lv_display_get_vertical_resolution(
-                                          context->display_device_object);
+            int32_t hor_res = lv_display_get_horizontal_resolution(
+                                context->display_device_object);
+            int32_t ver_res = lv_display_get_vertical_resolution(
+                                context->display_device_object);
 
-                    context->pointer.point.x = lv_windows_zoom_to_logical(
-                                                   GET_X_LPARAM(lParam),
-                                                   context->zoom_level);
-                    context->pointer.point.y = lv_windows_zoom_to_logical(
-                                                   GET_Y_LPARAM(lParam),
-                                                   context->zoom_level);
-                    if(context->simulator_mode) {
-                        context->pointer.point.x = lv_windows_dpi_to_logical(
-                                                       context->pointer.point.x,
-                                                       context->window_dpi);
-                        context->pointer.point.y = lv_windows_dpi_to_logical(
-                                                       context->pointer.point.y,
-                                                       context->window_dpi);
-                    }
-                    if(context->pointer.point.x < 0) {
-                        context->pointer.point.x = 0;
-                    }
-                    if(context->pointer.point.x > hor_res - 1) {
-                        context->pointer.point.x = hor_res - 1;
-                    }
-                    if(context->pointer.point.y < 0) {
-                        context->pointer.point.y = 0;
-                    }
-                    if(context->pointer.point.y > ver_res - 1) {
-                        context->pointer.point.y = ver_res - 1;
-                    }
-                }
-
-                break;
+            context->pointer.point.x = lv_windows_zoom_to_logical(
+                                        GET_X_LPARAM(lParam),
+                                        context->zoom_level);
+            context->pointer.point.y = lv_windows_zoom_to_logical(
+                                        GET_Y_LPARAM(lParam),
+                                        context->zoom_level);
+            if(context->simulator_mode) {
+                context->pointer.point.x = lv_windows_dpi_to_logical(
+                                            context->pointer.point.x,
+                                            context->window_dpi);
+                context->pointer.point.y = lv_windows_dpi_to_logical(
+                                            context->pointer.point.y,
+                                            context->window_dpi);
             }
+            if(context->pointer.point.x < 0) {
+                context->pointer.point.x = 0;
+            }
+            if(context->pointer.point.x > hor_res - 1) {
+                context->pointer.point.x = hor_res - 1;
+            }
+            if(context->pointer.point.y < 0) {
+                context->pointer.point.y = 0;
+            }
+            if(context->pointer.point.y > ver_res - 1) {
+                context->pointer.point.y = ver_res - 1;
+            }
+
+            break;
+        }
         case WM_LBUTTONDOWN:
         case WM_LBUTTONUP: {
-                lv_windows_window_context_t * context = (lv_windows_window_context_t *)(
-                                                            lv_windows_get_window_context(hWnd));
-                if(context) {
-                    context->pointer.state = (
-                                                 uMsg == WM_LBUTTONDOWN
-                                                 ? LV_INDEV_STATE_PRESSED
-                                                 : LV_INDEV_STATE_RELEASED);
-                }
-
+                context->pointer.state = (
+                                            uMsg == WM_LBUTTONDOWN
+                                            ? LV_INDEV_STATE_PRESSED
+                                            : LV_INDEV_STATE_RELEASED);
                 break;
             }
         case WM_TOUCH: {
-                lv_windows_window_context_t * context = (lv_windows_window_context_t *)(
-                                                            lv_windows_get_window_context(hWnd));
-                if(context) {
-                    UINT input_count = LOWORD(wParam);
-                    HTOUCHINPUT touch_input_handle = (HTOUCHINPUT)(lParam);
+            UINT input_count = LOWORD(wParam);
+            HTOUCHINPUT touch_input_handle = (HTOUCHINPUT)(lParam);
 
-                    PTOUCHINPUT inputs = malloc(input_count * sizeof(TOUCHINPUT));
-                    if(inputs) {
-                        if(lv_windows_get_touch_input_info(
-                               touch_input_handle,
-                               input_count,
-                               inputs,
-                               sizeof(TOUCHINPUT))) {
-                            for(UINT i = 0; i < input_count; ++i) {
-                                POINT Point;
-                                Point.x = TOUCH_COORD_TO_PIXEL(inputs[i].x);
-                                Point.y = TOUCH_COORD_TO_PIXEL(inputs[i].y);
-                                if(!ScreenToClient(hWnd, &Point)) {
-                                    continue;
-                                }
-
-                                context->pointer.point.x = lv_windows_zoom_to_logical(
-                                                               Point.x,
-                                                               context->zoom_level);
-                                context->pointer.point.y = lv_windows_zoom_to_logical(
-                                                               Point.y,
-                                                               context->zoom_level);
-                                if(context->simulator_mode) {
-                                    context->pointer.point.x = lv_windows_dpi_to_logical(
-                                                                   context->pointer.point.x,
-                                                                   context->window_dpi);
-                                    context->pointer.point.y = lv_windows_dpi_to_logical(
-                                                                   context->pointer.point.y,
-                                                                   context->window_dpi);
-                                }
-
-                                DWORD MousePressedMask =
-                                    TOUCHEVENTF_MOVE | TOUCHEVENTF_DOWN;
-
-                                context->pointer.state = (
-                                                             inputs[i].dwFlags & MousePressedMask
-                                                             ? LV_INDEV_STATE_PRESSED
-                                                             : LV_INDEV_STATE_RELEASED);
-                            }
+            PTOUCHINPUT inputs = malloc(input_count * sizeof(TOUCHINPUT));
+            if(inputs) {
+                if(lv_windows_get_touch_input_info(
+                    touch_input_handle,
+                    input_count,
+                    inputs,
+                    sizeof(TOUCHINPUT))) {
+                    for(UINT i = 0; i < input_count; ++i) {
+                        POINT Point;
+                        Point.x = TOUCH_COORD_TO_PIXEL(inputs[i].x);
+                        Point.y = TOUCH_COORD_TO_PIXEL(inputs[i].y);
+                        if(!ScreenToClient(hWnd, &Point)) {
+                            continue;
                         }
 
-                        free(inputs);
-                    }
+                        context->pointer.point.x = lv_windows_zoom_to_logical(
+                                                    Point.x,
+                                                    context->zoom_level);
+                        context->pointer.point.y = lv_windows_zoom_to_logical(
+                                                    Point.y,
+                                                    context->zoom_level);
+                        if(context->simulator_mode) {
+                            context->pointer.point.x = lv_windows_dpi_to_logical(
+                                                        context->pointer.point.x,
+                                                        context->window_dpi);
+                            context->pointer.point.y = lv_windows_dpi_to_logical(
+                                                        context->pointer.point.y,
+                                                        context->window_dpi);
+                        }
 
-                    lv_windows_close_touch_input_handle(touch_input_handle);
+                        DWORD MousePressedMask =
+                            TOUCHEVENTF_MOVE | TOUCHEVENTF_DOWN;
+
+                        context->pointer.state = (
+                                                    inputs[i].dwFlags & MousePressedMask
+                                                    ? LV_INDEV_STATE_PRESSED
+                                                    : LV_INDEV_STATE_RELEASED);
+                    }
                 }
 
-                break;
+                free(inputs);
             }
+
+            lv_windows_close_touch_input_handle(touch_input_handle);
+            break;
+        }
         default:
             // Not Handled
             return false;

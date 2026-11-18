@@ -258,6 +258,13 @@ int32_t lv_arc_get_knob_offset(const lv_obj_t * obj);
  */
 uint32_t lv_arc_get_change_rate(lv_obj_t * obj);
 
+/**
+ * Give the arc is being dragged or not
+ * @param obj       pointer to an arc object
+ * @return          true: drag in progress false: not dragged
+ */
+bool lv_arc_is_dragged(const lv_obj_t * obj);
+
 /*=====================
  * Other functions
  *====================*/

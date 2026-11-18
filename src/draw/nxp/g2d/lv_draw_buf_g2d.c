@@ -61,6 +61,11 @@ void lv_draw_buf_g2d_init_handlers(void)
     handlers->invalidate_cache_cb = _invalidate_cache;
 }
 
+void lv_draw_buf_g2d_deinit_handlers(void)
+{
+    lv_draw_buf_init_with_default_handlers(lv_draw_buf_get_handlers());
+}
+
 /**********************
  *   STATIC FUNCTIONS
  **********************/

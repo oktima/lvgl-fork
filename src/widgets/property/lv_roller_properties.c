@@ -14,9 +14,10 @@
  * Generated code from properties.py
  */
 /* *INDENT-OFF* */
-const lv_property_name_t lv_roller_property_names[3] = {
+const lv_property_name_t lv_roller_property_names[4] = {
     {"options",                LV_PROPERTY_ROLLER_OPTIONS,},
     {"selected",               LV_PROPERTY_ROLLER_SELECTED,},
+    {"selected_highlight",     LV_PROPERTY_ROLLER_SELECTED_HIGHLIGHT,},
     {"visible_row_count",      LV_PROPERTY_ROLLER_VISIBLE_ROW_COUNT,},
 };
 #endif /*LV_USE_ROLLER*/

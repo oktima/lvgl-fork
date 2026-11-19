@@ -34,6 +34,7 @@
 
 #define LV_LABEL_DEF_SCROLL_SPEED   lv_anim_speed_clamped(40, 300, 10000)
 #define LV_LABEL_SCROLL_DELAY       300
+#define LV_LABEL_ANIM_SPEED_MASK    0x80000000 /*Same as LV_ANIM_SPEED_MASK, private to lv_anim.c*/
 #define LV_LABEL_DOT_BEGIN_INV 0xFFFFFFFF
 #define LV_LABEL_HINT_HEIGHT_LIMIT 1024 /*Enable "hint" to buffer info about labels larger than this. (Speed up drawing)*/
 
@@ -58,6 +59,7 @@ static void lv_label_set_dots(lv_obj_t * label, uint32_t dot_begin);
 
 static void set_ofs_x_anim(void * obj, int32_t v);
 static void set_ofs_y_anim(void * obj, int32_t v);
+static uint32_t resolve_scroll_duration(uint32_t speed_or_time, int32_t start, int32_t end);
 static size_t get_text_length(const char * text);
 static void copy_text_to_label(lv_label_t * label, const char * text);
 static lv_text_flag_t get_label_flags(lv_label_t * label);
@@ -1158,7 +1160,7 @@ static void lv_label_refr_text(lv_obj_t * obj)
                 reverse_play_in_progress = anim_cur->reverse_play_in_progress;
             }
 
-            int32_t duration_resolved = lv_anim_resolve_speed(anim_time, start, end);
+            int32_t duration_resolved = resolve_scroll_duration(anim_time, start, end);
             /*To keep the old position*/
             if(act_time > duration_resolved) act_time = duration_resolved;
 
@@ -1171,8 +1173,8 @@ static void lv_label_refr_text(lv_obj_t * obj)
                 a.start_value = a.end_value;
                 a.end_value   = tmp;
             }
-            lv_anim_set_duration(&a, anim_time);
-            lv_anim_set_reverse_duration(&a, anim_time);
+            lv_anim_set_duration(&a, duration_resolved);
+            lv_anim_set_reverse_duration(&a, duration_resolved);
 
             /*If a template animation exists, overwrite some property*/
             if(anim_template)
@@ -1193,6 +1195,7 @@ static void lv_label_refr_text(lv_obj_t * obj)
         if(size.y > lv_area_get_height(&txt_coords) && hor_anim == false) {
             lv_anim_set_values(&a, 0, lv_area_get_height(&txt_coords) - size.y - (lv_font_get_line_height(font)));
             lv_anim_set_exec_cb(&a, set_ofs_y_anim);
+            int32_t duration_resolved = resolve_scroll_duration(anim_time, a.start_value, a.end_value);
 
             lv_anim_t * anim_cur = lv_anim_get(obj, set_ofs_y_anim);
             int32_t act_time = 0;
@@ -1201,7 +1204,7 @@ static void lv_label_refr_text(lv_obj_t * obj)
                 act_time = anim_cur->act_time;
                 reverse_play_in_progress = anim_cur->reverse_play_in_progress;
             }
-            if(act_time > a.duration) act_time = a.duration;
+            if(act_time > duration_resolved) act_time = duration_resolved;
             a.act_time = act_time;      /*To keep the old position*/
             if(reverse_play_in_progress) {
                 a.reverse_play_in_progress = 1;
@@ -1212,8 +1215,8 @@ static void lv_label_refr_text(lv_obj_t * obj)
                 a.end_value   = tmp;
             }
 
-            lv_anim_set_duration(&a, anim_time);
-            lv_anim_set_reverse_duration(&a, anim_time);
+            lv_anim_set_duration(&a, duration_resolved);
+            lv_anim_set_reverse_duration(&a, duration_resolved);
 
             /*If a template animation exists, overwrite some property*/
             if(anim_template) {
@@ -1261,13 +1264,13 @@ static void lv_label_refr_text(lv_obj_t * obj)
             lv_anim_set_values(&a, 0, -size.x - lv_font_get_glyph_width(font, ' ', ' ') * LV_LABEL_WAIT_CHAR_COUNT);
 #endif
             lv_anim_set_exec_cb(&a, set_ofs_x_anim);
-            lv_anim_set_duration(&a, anim_time);
+            int32_t duration_resolved = resolve_scroll_duration(anim_time, a.start_value, a.end_value);
+            lv_anim_set_duration(&a, duration_resolved);
 
             lv_anim_t * anim_cur = lv_anim_get(obj, set_ofs_x_anim);
             int32_t act_time = anim_cur ? anim_cur->act_time : 0;
 
             /*To keep the old position when the label text is updated mid-scrolling*/
-            int32_t duration_resolved = lv_anim_resolve_speed(anim_time, a.start_value, a.end_value);
             if(act_time < duration_resolved) {
                 a.act_time = act_time;
             }
@@ -1289,7 +1292,7 @@ static void lv_label_refr_text(lv_obj_t * obj)
         if(size.y > lv_area_get_height(&txt_coords) && hor_anim == false) {
             lv_anim_set_values(&a, 0, -size.y - (lv_font_get_line_height(font)));
             lv_anim_set_exec_cb(&a, set_ofs_y_anim);
-            lv_anim_set_duration(&a, anim_time);
+            lv_anim_set_duration(&a, resolve_scroll_duration(anim_time, a.start_value, a.end_value));
 
             lv_anim_t * anim_cur = lv_anim_get(obj, set_ofs_y_anim);
             int32_t act_time = anim_cur ? anim_cur->act_time : 0;
@@ -1401,6 +1404,29 @@ static void set_ofs_y_anim(void * obj, int32_t v)
     lv_label_t * label = (lv_label_t *)obj;
     label->offset.y    = v;
     lv_obj_invalidate(obj);
+}
+
+/**
+ * Turn the value of a scrolling label's `anim_duration` style, a time or a speed, into the duration in ms
+ * of its offset animation.
+ * A plain time is kept. A speed (from `lv_anim_speed()` or `lv_anim_speed_clamped()`) is converted with the
+ * distance to scroll and clamped between its minimum and maximum time, as `lv_anim_resolve_speed()` does,
+ * except that a maximum time of 0 means no maximum: with `lv_anim_speed_clamped(speed, min_time, 0)` a long text
+ * scrolls at the requested speed, while the maximum of `lv_anim_speed()` (about 10 s) would make it scroll faster.
+ */
+static uint32_t resolve_scroll_duration(uint32_t speed_or_time, int32_t start, int32_t end)
+{
+    if((speed_or_time & LV_LABEL_ANIM_SPEED_MASK) == 0) return speed_or_time;
+
+    /*Decode as lv_anim_resolve_speed() does: 10 bits each, in units of 10 px/s and 10 ms*/
+    uint32_t speed = (speed_or_time & 0x3FF) * 10;
+    uint32_t min_time = ((speed_or_time >> 10) & 0x3FF) * 10;
+    uint32_t max_time = ((speed_or_time >> 20) & 0x3FF) * 10;
+    if(speed == 0) speed = 10; /*lv_anim_speed() encodes under 5 px/s as 0: use the lowest speed it can encode*/
+
+    uint32_t time = lv_anim_speed_to_time(speed, start, end);
+    if(max_time == 0) return LV_MAX(time, min_time);
+    return LV_CLAMP(min_time, time, max_time);
 }
 
 static size_t get_text_length(const char * text)

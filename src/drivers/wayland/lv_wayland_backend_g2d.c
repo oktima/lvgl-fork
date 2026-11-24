@@ -38,6 +38,8 @@
  *      TYPEDEFS
  **********************/
 
+typedef struct lv_wl_g2d_display_data lv_wl_g2d_display_data_t;
+
 typedef struct {
     struct wl_buffer * wl_buffer;
     lv_draw_buf_t * lv_draw_buf;
@@ -45,9 +47,11 @@ typedef struct {
     uint32_t stride;
     uint32_t offset;
     bool busy;
+    /* The display data holding this buffer */
+    lv_wl_g2d_display_data_t * ddata;
 } lv_wl_buffer_t;
 
-typedef struct {
+struct lv_wl_g2d_display_data {
     lv_wl_buffer_t buffers[LV_WL_G2D_BUF_COUNT];
     /* Use a separate buffer if rotation is enabled
      * Let LVGL render to this buffer and then copy it
@@ -55,13 +59,19 @@ typedef struct {
     lv_wl_buffer_t rotate_buffer;
     uint32_t drm_cf;
     uint8_t next_buf_idx;
-} lv_wl_g2d_display_data_t;
+    /* Replaced by a resize while the compositor still used some of its buffers: deleted once it
+     * releases them (see `release_display_data()`), linked in `lv_wl_g2d_ctx_t.released_ddata` */
+    bool released;
+    lv_wl_g2d_display_data_t * next_released;
+};
 
 typedef struct {
     struct zwp_linux_dmabuf_v1 * handler;
     struct zwp_linux_dmabuf_feedback_v1 * feedback;
     /* XRBG888 and ARGB8888 are always supported*/
     bool supports_rgb565;
+    /* Display data waiting for the compositor to release their buffers before being deleted */
+    lv_wl_g2d_display_data_t * released_ddata;
 } lv_wl_g2d_ctx_t;
 
 /**********************
@@ -82,6 +92,8 @@ static lv_wl_g2d_display_data_t * wl_g2d_create_display_data(lv_wl_g2d_ctx_t * c
                                                              int32_t width, int32_t height);
 
 static void wl_g2d_delete_display_data(lv_wl_g2d_display_data_t * ddata);
+static void release_display_data(lv_wl_g2d_ctx_t * ctx, lv_wl_g2d_display_data_t * ddata);
+static bool delete_released_buffers(lv_wl_g2d_display_data_t * ddata);
 
 static void flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * color_p);
 
@@ -205,6 +217,12 @@ static void wl_g2d_deinit(void * backend_ctx)
     if(!ctx) {
         return;
     }
+    /* The compositor won't release the buffers it still holds any more: delete them anyway */
+    while(ctx->released_ddata) {
+        lv_wl_g2d_display_data_t * ddata = ctx->released_ddata;
+        ctx->released_ddata = ddata->next_released;
+        wl_g2d_delete_display_data(ddata);
+    }
     if(ctx->feedback) {
         zwp_linux_dmabuf_feedback_v1_destroy(ctx->feedback);
         ctx->feedback = NULL;
@@ -302,8 +320,10 @@ static lv_wl_g2d_display_data_t * wl_g2d_create_display_data(lv_wl_g2d_ctx_t * c
 
     ddata->drm_cf = lv_cf_to_drm_cf(cf);
     for(size_t i = 0; i < LV_WL_G2D_BUF_COUNT; i++) {
+        ddata->buffers[i].ddata = ddata;
         init_buffer(ctx, &ddata->buffers[i], width, height, cf);
     }
+    ddata->rotate_buffer.ddata = ddata;
 
     lv_display_rotation_t rotation = lv_display_get_rotation(display);
     if(rotation == LV_DISPLAY_ROTATION_90 || rotation == LV_DISPLAY_ROTATION_270) {
@@ -348,6 +368,48 @@ static void wl_g2d_delete_display_data(lv_wl_g2d_display_data_t * ddata)
     delete_buffer(&ddata->rotate_buffer);
 
     lv_free(ddata);
+}
+
+/**
+ * Delete display data that a resize replaced. The compositor may still use some of its buffers:
+ * those are deleted, and then the display data, only once it releases them (see `buffer_release()`).
+ * @param ctx       the backend context, which keeps the display data until then
+ * @param ddata     the display data to delete
+ */
+static void release_display_data(lv_wl_g2d_ctx_t * ctx, lv_wl_g2d_display_data_t * ddata)
+{
+    if(delete_released_buffers(ddata)) {
+        lv_free(ddata);
+        return;
+    }
+
+    LV_LOG_TRACE("Deferring the deletion of the buffers the compositor still uses");
+    ddata->released = true;
+    ddata->next_released = ctx->released_ddata;
+    ctx->released_ddata = ddata;
+}
+
+/**
+ * Delete the buffers of display data that the compositor doesn't use.
+ * @param ddata     the display data
+ * @return          true if all its buffers are deleted, false if the compositor still uses some
+ */
+static bool delete_released_buffers(lv_wl_g2d_display_data_t * ddata)
+{
+    bool all_deleted = true;
+    for(int i = 0; i < LV_WL_G2D_BUF_COUNT; i++) {
+        if(ddata->buffers[i].busy) {
+            all_deleted = false;
+        }
+        else {
+            delete_buffer(&ddata->buffers[i]);
+        }
+    }
+
+    /* Only rendered into, never attached to the surface */
+    delete_buffer(&ddata->rotate_buffer);
+
+    return all_deleted;
 }
 
 static void * wl_g2d_init_display(void * backend_ctx, lv_display_t * display, int32_t width, int32_t height)
@@ -407,6 +469,23 @@ static void buffer_release(void * data, struct wl_buffer * buffer)
     LV_UNUSED(buffer);
     lv_wl_buffer_t * buf = data;
     buf->busy = false;
+
+    /* A resize replaced the display data of this buffer while the compositor still used it:
+     * delete it now, and the display data with its last buffer */
+    lv_wl_g2d_display_data_t * ddata = buf->ddata;
+    if(!ddata || !ddata->released || !delete_released_buffers(ddata)) {
+        return;
+    }
+
+    lv_wl_g2d_display_data_t ** link = &ctx.released_ddata;
+    while(*link && *link != ddata) {
+        link = &(*link)->next_released;
+    }
+    if(*link) {
+        *link = ddata->next_released;
+    }
+    LV_LOG_TRACE("Buffers released, deleted the replaced display data");
+    lv_free(ddata);
 }
 
 
@@ -444,8 +523,11 @@ static void * wl_g2d_resize_display(void * backend_ctx, lv_display_t * disp)
         return NULL;
     }
 
+    /* The compositor may still use the buffers of the old display data: don't delete them under it */
     lv_wl_g2d_display_data_t * old_ddata = lv_wayland_get_backend_display_data(disp);
-    wl_g2d_delete_display_data(old_ddata);
+    if(old_ddata) {
+        release_display_data(ctx, old_ddata);
+    }
     return ddata;
 }
 

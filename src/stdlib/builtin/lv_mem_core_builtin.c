@@ -18,12 +18,6 @@
     #include LV_MEM_POOL_INCLUDE
 #endif
 
-#ifdef STM32H7S7xx
-#define LVGL_WORKMEM_SECTION __attribute__((section("LVGL_WorkMem"))) __attribute__((aligned(4)))
-#else
-#define LVGL_WORKMEM_SECTION
-#endif
-
 /*********************
  *      DEFINES
  *********************/

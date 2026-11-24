@@ -29,6 +29,12 @@
 
 #define DRAW_UNIT_ID_OPENGLES 6
 
+/*The upstream count of textures is replaced by a size in bytes: don't let an
+ *lv_conf.h written for upstream LVGL silently fall back to the default size*/
+#if defined(LV_DRAW_OPENGLES_TEXTURE_CACHE_COUNT) || defined(CONFIG_LV_DRAW_OPENGLES_TEXTURE_CACHE_COUNT)
+    #error "LV_DRAW_OPENGLES_TEXTURE_CACHE_COUNT is replaced by LV_DRAW_OPENGLES_TEXTURE_CACHE_SIZE, the size of the texture cache in bytes"
+#endif
+
 #define USE_MY_LOG 0
 
 #if USE_MY_LOG

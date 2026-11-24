@@ -658,10 +658,11 @@
 
 #if LV_USE_DRAW_OPENGLES
 /** Maximum total size in bytes of the textures kept in the cache
- *  (width * height * 4 per texture). A bigger cache means fewer redraws
- *  but more GPU memory.
+ *  (width * height * 4 per texture), 64 MB by default. A bigger cache
+ *  means fewer redraws but more GPU memory. It replaces
+ *  LV_DRAW_OPENGLES_TEXTURE_CACHE_COUNT, a number of textures.
  */
-#define LV_DRAW_OPENGLES_TEXTURE_CACHE_SIZE 16384
+#define LV_DRAW_OPENGLES_TEXTURE_CACHE_SIZE 67108864
 
 #endif /*LV_USE_DRAW_OPENGLES*/
 

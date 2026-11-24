@@ -93,11 +93,6 @@ static void _draw_nema_gfx_img(lv_draw_task_t * t, const lv_draw_image_dsc_t * d
 
     lv_color_format_t src_cf = header->cf;
 
-    /*Image contains Alpha*/
-    if(src_cf == LV_COLOR_FORMAT_ARGB8888 || src_cf == LV_COLOR_FORMAT_XRGB8888) {
-        blending_mode |= NEMA_BLOP_SRC_PREMULT;
-    }
-
     uint32_t src_nema_cf = lv_nemagfx_cf_to_nema(src_cf);
     /* the stride should be computed internally for NEMA_TSC images and images missing a stride value */
     int32_t src_stride = (src_cf >= LV_COLOR_FORMAT_NEMA_TSC_START && src_cf <= LV_COLOR_FORMAT_NEMA_TSC_END)

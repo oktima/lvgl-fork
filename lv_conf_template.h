@@ -1875,15 +1875,16 @@
 /** LVGL is deinitialized before the application exits. */
 #define LV_WAYLAND_DIRECT_EXIT 1
 
-#if !LV_USE_DRAW_OPENGLES
 #if !LV_USE_DRAW_NANOVG
 /** Default backend, using wl_shm for double-buffered direct rendering.
  *  Compatible with all Wayland compositors; no special hardware required.
- *  Unavailable with the OpenGL ES and NanoVG renderers, which can only
- *  render into a GPU surface.
+ *  Unavailable with the NanoVG renderer, which can only render into a GPU
+ *  surface. With the OpenGL ES renderer, the application initializes its
+ *  draw unit only when it selects the EGL backend (lv_draw_opengles_init()).
  */
 #define LV_WAYLAND_USE_SHM 1
 
+#if !LV_USE_DRAW_OPENGLES
 /** Presents software-rendered frames through linear DMA-BUFs that the
  *  compositor can scan out directly, saving its copy out of shared memory.
  *  Requires a compositor with zwp_linux_dmabuf_v1 and a gbm implementation
@@ -1893,31 +1894,30 @@
  */
 #define LV_WAYLAND_USE_DMABUF 0
 
-#endif /*!LV_USE_DRAW_NANOVG*/
 #endif /*!LV_USE_DRAW_OPENGLES*/
+#endif /*!LV_USE_DRAW_NANOVG*/
 
 /** Hardware-accelerated rendering via OpenGL ES 2.0 and EGL, compatible
  *  with LVGL 3D/glTF rendering. Requires OpenGL ES 2.0 on the target
  *  hardware and linking with wayland-egl (-lwayland-egl).
- *  The only backend available with the OpenGL ES and NanoVG renderers.
+ *  The only backend available with the NanoVG renderer.
  *
  *  Enable: LV_USE_OPENGLES
  */
 #define LV_WAYLAND_USE_EGL 0
 
-#if !LV_USE_DRAW_OPENGLES
 #if !LV_USE_DRAW_NANOVG
 /** Hardware-accelerated 2D rendering via NXP's G2D engine.
  *  Supports NXP i.MX6/i.MX8 platforms with G2D library installed.
- *  Unavailable with the OpenGL ES and NanoVG renderers, which can only
- *  render into a GPU surface.
+ *  Unavailable with the NanoVG renderer, which can only render into a GPU
+ *  surface. With the OpenGL ES renderer, the application initializes its
+ *  draw unit only when it selects the EGL backend (lv_draw_opengles_init()).
  *
  *  Enable: LV_USE_DRAW_G2D
  */
 #define LV_WAYLAND_USE_G2D 0
 
 #endif /*!LV_USE_DRAW_NANOVG*/
-#endif /*!LV_USE_DRAW_OPENGLES*/
 #endif /*LV_USE_WAYLAND*/
 
 #if LV_USE_OS == LV_OS_WINDOWS

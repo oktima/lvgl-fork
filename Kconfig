@@ -2933,12 +2933,13 @@ config LV_WAYLAND_DIRECT_EXIT
 config LV_WAYLAND_USE_SHM
 	bool "SHM (Shared Memory) Backend"
 	default y
-	depends on !LV_USE_DRAW_OPENGLES && !LV_USE_DRAW_NANOVG
+	depends on !LV_USE_DRAW_NANOVG
 	help
 		Default backend, using wl_shm for double-buffered direct rendering.
 		Compatible with all Wayland compositors; no special hardware required.
-		Unavailable with the OpenGL ES and NanoVG renderers, which can only
-		render into a GPU surface.
+		Unavailable with the NanoVG renderer, which can only render into a GPU
+		surface. With the OpenGL ES renderer, the application initializes its
+		draw unit only when it selects the EGL backend (lv_draw_opengles_init()).
 
 config LV_WAYLAND_USE_DMABUF
 	bool "DMA-BUF Backend"
@@ -2961,18 +2962,19 @@ config LV_WAYLAND_USE_EGL
 		Hardware-accelerated rendering via OpenGL ES 2.0 and EGL, compatible
 		with LVGL 3D/glTF rendering. Requires OpenGL ES 2.0 on the target
 		hardware and linking with wayland-egl (-lwayland-egl).
-		The only backend available with the OpenGL ES and NanoVG renderers.
+		The only backend available with the NanoVG renderer.
 
 config LV_WAYLAND_USE_G2D
 	bool "G2D (NXP i.MX hardware accelerator)"
-	depends on !LV_USE_DRAW_OPENGLES && !LV_USE_DRAW_NANOVG
+	depends on !LV_USE_DRAW_NANOVG
 	select LV_USE_DRAW_G2D
 	select LV_WAYLAND_USE_DMABUF_PROTOCOL
 	help
 		Hardware-accelerated 2D rendering via NXP's G2D engine.
 		Supports NXP i.MX6/i.MX8 platforms with G2D library installed.
-		Unavailable with the OpenGL ES and NanoVG renderers, which can only
-		render into a GPU surface.
+		Unavailable with the NanoVG renderer, which can only render into a GPU
+		surface. With the OpenGL ES renderer, the application initializes its
+		draw unit only when it selects the EGL backend (lv_draw_opengles_init()).
 
 config LV_WAYLAND_USE_DMABUF_PROTOCOL
 	bool

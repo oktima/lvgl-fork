@@ -53,9 +53,15 @@
 #endif
 
 /* The SHM, G2D and DMA-BUF backends hand a CPU buffer to LVGL, which the OpenGL
- * draw units can't work with*/
-#if (LV_WAYLAND_USE_SHM || LV_WAYLAND_USE_G2D || LV_WAYLAND_USE_DMABUF) && (LV_USE_DRAW_OPENGLES || LV_USE_DRAW_NANOVG)
-    #error "LV_WAYLAND_USE_SHM, LV_WAYLAND_USE_G2D and LV_WAYLAND_USE_DMABUF are not compatible with LV_USE_DRAW_OPENGLES or LV_USE_DRAW_NANOVG. Use LV_WAYLAND_USE_EGL instead."
+ * draw units can't work with.
+ * Oktima: the OpenGL ES draw unit is not initialized by lv_init(): the application
+ * initializes it only when it selects the EGL backend (lv_binding_rust), so a single
+ * build can fall back to G2D or SHM. The NanoVG one is, so it still excludes them. */
+#if (LV_WAYLAND_USE_SHM || LV_WAYLAND_USE_G2D || LV_WAYLAND_USE_DMABUF) && LV_USE_DRAW_NANOVG
+    #error "LV_WAYLAND_USE_SHM, LV_WAYLAND_USE_G2D and LV_WAYLAND_USE_DMABUF are not compatible with LV_USE_DRAW_NANOVG. Use LV_WAYLAND_USE_EGL instead."
+#endif
+#if LV_WAYLAND_USE_DMABUF && LV_USE_DRAW_OPENGLES
+    #error "LV_WAYLAND_USE_DMABUF is not compatible with LV_USE_DRAW_OPENGLES. Use LV_WAYLAND_USE_EGL instead."
 #endif
 
 /* Ordered by preference: the first backend that can initialize a display wins.

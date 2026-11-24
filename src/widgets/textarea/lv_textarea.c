@@ -902,9 +902,8 @@ static void lv_textarea_event(const lv_obj_class_t * class_p, lv_event_t * e)
         start_cursor_blink(obj);
     }
     else if(code == LV_EVENT_KEY) {
-        uint32_t c = lv_event_get_key(e);
+        uint32_t c = *((uint32_t *)lv_event_get_param(e)); /*uint32_t because can be UTF-8*/
         uint32_t modifier_keys = lv_event_get_modifier_keys(e);
-
         if(c == LV_KEY_RIGHT)
             lv_textarea_cursor_right(obj);
         else if(c == LV_KEY_LEFT)

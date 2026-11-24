@@ -327,7 +327,7 @@ void lv_group_focus_freeze(lv_group_t * group, bool en)
     else group->frozen = 1;
 }
 
-lv_result_t lv_group_send_data(lv_group_t * group, uint32_t c, uint16_t modifier_keys)
+lv_result_t lv_group_send_data(lv_group_t * group, uint32_t c)
 {
     LV_CHECK_ARG(group != NULL, return LV_RESULT_INVALID);
 
@@ -336,8 +336,7 @@ lv_result_t lv_group_send_data(lv_group_t * group, uint32_t c, uint16_t modifier
 
     if(lv_obj_has_state(act, LV_STATE_DISABLED)) return LV_RESULT_OK;
 
-    uint32_t data[2] = {c, modifier_keys};
-    return lv_obj_send_event(act, LV_EVENT_KEY, data);
+    return lv_obj_send_event(act, LV_EVENT_KEY, &c);
 }
 
 void lv_group_set_focus_cb(lv_group_t * group, lv_group_focus_cb_t focus_cb)

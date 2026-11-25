@@ -284,8 +284,11 @@ void lv_draw_nema_gfx_set_non_square_pixel_ratio(float ratio)
 
 void lv_draw_nema_gfx_img(lv_draw_task_t * t, const lv_draw_image_dsc_t * dsc, const lv_area_t * coords)
 {
+    /*The GPU reads the decoded image from the memory: clean the data cache after the CPU decodes it in RAM. The
+     *decoder skips it for an image it uses directly*/
     const lv_image_decoder_args_t args = {
         .use_indexed = true,
+        .flush_cache = true,
     };
 
     if(!dsc->tile) {

@@ -48,6 +48,10 @@ void lv_draw_nema_gfx_layer(lv_draw_task_t * t, const lv_draw_image_dsc_t * draw
      *In this case just return. */
     if(layer_to_draw->draw_buf == NULL) return;
 
+    /*The GPU reads the layer from the memory: clean the data cache, where the software renderer leaves what it
+     *drew in the layer*/
+    lv_draw_buf_flush_cache(layer_to_draw->draw_buf, NULL);
+
     lv_draw_image_dsc_t new_draw_dsc = *draw_dsc;
     new_draw_dsc.src = layer_to_draw->draw_buf;
 

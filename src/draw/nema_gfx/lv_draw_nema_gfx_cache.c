@@ -89,7 +89,14 @@ static void __invalidate_flush_cache(const lv_draw_buf_t * draw_buf, const lv_ar
         address += stride;
     }
 
+    /*On STM32N6 the ICACHE is the texture cache that the GPU2D reads textures
+     *through: invalidate it too, so the GPU2D doesn't read stale lines of this
+     *buffer as a texture. On other families (e.g. STM32U5) the ICACHE is the
+     *instruction cache of the CPU, unrelated to the GPU2D: invalidating it
+     *would only slow the CPU down, and its HAL module is often not built.*/
+#if defined(STM32N6) && defined(HAL_ICACHE_MODULE_ENABLED)
     HAL_ICACHE_Invalidate();
+#endif
 }
 
 #endif

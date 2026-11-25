@@ -344,6 +344,14 @@ lv_dir_t lv_indev_get_gesture_dir(const lv_indev_t * indev);
  */
 uint32_t lv_indev_get_key(const lv_indev_t * indev);
 
+/**
+ * Get the modifier keys (`LV_KEY_MOD_...`) held with the last key of an input device
+ * (for LV_INDEV_TYPE_KEYPAD)
+ * @param indev pointer to an input device
+ * @return the modifier keys (0 on error)
+ */
+uint16_t lv_indev_get_modifier_keys(const lv_indev_t * indev);
+
 
 /**
  * Get the counter for consecutive clicks within a short distance and time.

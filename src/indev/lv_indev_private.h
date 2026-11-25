@@ -119,6 +119,7 @@ struct _lv_indev_t {
         /*Keypad data*/
         lv_indev_state_t last_state;
         uint32_t last_key;
+        uint16_t last_modifier_keys;
     } keypad;
 
     lv_obj_t * cursor;     /**< Cursor for LV_INPUT_TYPE_POINTER*/

@@ -303,6 +303,8 @@ bool lv_windows_pointer_device_window_message_handler(
         context = (lv_windows_window_context_t *)(lv_windows_get_window_context(hWnd));
 
         if (!context) {
+            /* A handled WM_TOUCH must close its handle, or it leaks */
+            if(uMsg == WM_TOUCH) lv_windows_close_touch_input_handle((HTOUCHINPUT)lParam);
             *plResult = 0;
             return true;
         }
@@ -311,6 +313,7 @@ bool lv_windows_pointer_device_window_message_handler(
         // we reset the state to released to avoid the pointer to be stuck in pressed state
         if (context->pointer.indev && context->pointer.indev->enabled == 0) {
             context->pointer.state = LV_INDEV_STATE_RELEASED;
+            if(uMsg == WM_TOUCH) lv_windows_close_touch_input_handle((HTOUCHINPUT)lParam);
             *plResult = 0;
             return true;
         }

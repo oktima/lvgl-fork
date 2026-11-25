@@ -63,6 +63,10 @@ void g2d_create_buf_map(void)
 
 void g2d_free_buf_map(void)
 {
+    if(table == NULL) {
+        return;
+    }
+
     for(int i = 0; i < table->size; i++) {
         if(table->overflow_list[i]) {
             lv_array_deinit(table->overflow_list[i]);
@@ -77,10 +81,18 @@ void g2d_free_buf_map(void)
     lv_free(table->items);
     lv_free(table->overflow_list);
     lv_free(table);
+    /* G2D buffers can still be freed after this (e.g. by a display deleted later): let them find
+     * no map instead of a freed one */
+    table = NULL;
 }
 
 void g2d_insert_buf_map(void * key, struct g2d_buf * value)
 {
+    if(table == NULL) {
+        G2D_ASSERT_MSG(false, "The G2D buffer map is not created.");
+        return;
+    }
+
     lv_map_item_t * item = _map_create_item(key, value);
     int index = _map_hash_function(key);
 
@@ -114,6 +126,10 @@ void g2d_insert_buf_map(void * key, struct g2d_buf * value)
 
 struct g2d_buf * g2d_search_buf_map(void * key)
 {
+    if(table == NULL) {
+        return NULL;
+    }
+
     int index = _map_hash_function(key);
     lv_map_item_t * item = table->items[index];
     lv_array_t * list = (lv_array_t *)table->overflow_list[index];
@@ -138,6 +154,12 @@ struct g2d_buf * g2d_search_buf_map(void * key)
 
 void g2d_free_item(void * key)
 {
+    /* After lv_draw_g2d_deinit() the map is freed and G2D closed: the buffer can't be freed any more */
+    if(table == NULL) {
+        LV_LOG_WARN("G2D buffer %p freed after the G2D deinit: it is not released", key);
+        return;
+    }
+
     /* Delete an item from the table. */
     int index = _map_hash_function(key);
     lv_map_item_t * item = table->items[index];
@@ -189,6 +211,11 @@ void g2d_free_item(void * key)
 void g2d_print_table(void)
 {
     LV_LOG("\nHash Table\n-------------------\n");
+
+    if(table == NULL) {
+        LV_LOG("Not created\n");
+        return;
+    }
 
     for(int i = 0; i < table->size; i++) {
         if(table->items[i]) {

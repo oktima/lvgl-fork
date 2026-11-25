@@ -18,12 +18,6 @@
     #include LV_MEM_POOL_INCLUDE
 #endif
 
-#ifdef STM32H7S7xx
-#define LVGL_WORKMEM_SECTION __attribute__((section("LVGL_WorkMem"))) __attribute__((aligned(4)))
-#else
-#define LVGL_WORKMEM_SECTION
-#endif
-
 /*********************
  *      DEFINES
  *********************/
@@ -167,13 +161,17 @@ void * lv_realloc_core(void * p, size_t new_size)
 #endif
 
     size_t old_size = lv_tlsf_block_size(p);
-    if(old_size > 0) {
-        old_size += lv_tlsf_alloc_overhead();
+    if(old_size > 0) old_size += lv_tlsf_alloc_overhead();
+
+    void * p_new = lv_tlsf_realloc(state.tlsf, p, new_size);
+
+    /*The old block is released only on success, or with a zero size, which TLSF
+     *treats as a free. On failure it stays allocated, so keep counting it.*/
+    if(p_new || new_size == 0) {
         if(state.cur_used > old_size) state.cur_used -= old_size;
         else state.cur_used = 0;
     }
 
-    void * p_new = lv_tlsf_realloc(state.tlsf, p, new_size);
     if(p_new) {
         state.cur_used += lv_tlsf_block_size(p_new) + lv_tlsf_alloc_overhead();
         state.max_used = LV_MAX(state.cur_used, state.max_used);

@@ -105,8 +105,8 @@ static void _draw_nema_gfx_img(lv_draw_task_t * t, const lv_draw_image_dsc_t * d
     }
     /*NEMA_BLOP_SRC_PREMULT premultiplies by the alpha of the texel before NEMA_BLOP_MODULATE_A scales it by the
      *opacity, and NEMA_BLOP_RECOLOR overrides it: a straight image drawn with an opacity or recolored keeps
-     *NEMA_BL_SIMPLE, right on an opaque destination only. An image with only alpha takes its color, premultiplied,
-     *from the texture mapping*/
+     *NEMA_BL_SIMPLE, right on an opaque destination only. In a premultiplied layer the software renderer draws it
+     *(see nema_gfx_evaluate). An image with only alpha takes its color, premultiplied, from the texture mapping*/
     else if(!alpha_only && dsc->blend_mode == LV_BLEND_MODE_NORMAL && (recolor || dsc->opa < 255)) {
         blending_mode = NEMA_BL_SIMPLE;
     }

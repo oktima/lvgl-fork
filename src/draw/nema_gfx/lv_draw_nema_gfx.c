@@ -214,6 +214,20 @@ static int32_t nema_gfx_evaluate(lv_draw_unit_t * draw_unit, lv_draw_task_t * ta
                 if(!lv_nemagfx_is_cf_supported(img_dsc->header.cf))
                     break;
 
+                /*A straight image drawn with an opacity or recolored is blended with NEMA_BL_SIMPLE (see
+                 *lv_draw_nema_gfx_img.c), which writes Sa*Sa as alpha: in a premultiplied layer the software renderer
+                 *draws it, except the NemaGFX formats, which it cannot decode and keep the Sa*Sa alpha.
+                 *An image without an alpha channel could stay on the GPU with an opacity: blended as a premultiplied
+                 *source, with NEMA_BLOP_MODULATE_RGB and NEMA_BLOP_MODULATE_A, it comes out right in a layer too*/
+                lv_color_format_t cf = draw_image_dsc->header.cf;
+                if((draw_image_dsc->recolor_opa > LV_OPA_MIN || draw_image_dsc->opa < 255) &&
+                   draw_image_dsc->blend_mode == LV_BLEND_MODE_NORMAL &&
+                   task->target_layer->color_format == LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED &&
+                   !LV_COLOR_FORMAT_IS_ALPHA_ONLY(cf) && cf != LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED &&
+                   !(draw_image_dsc->header.flags & LV_IMAGE_FLAGS_PREMULTIPLIED) &&
+                   !(cf >= LV_COLOR_FORMAT_NEMA_TSC_START && cf <= LV_COLOR_FORMAT_NEMA_TSC_END))
+                    break;
+
                 if(draw_image_dsc->blend_mode != LV_BLEND_MODE_SUBTRACTIVE) {
                     if(task->preference_score > 80) {
                         task->preference_score = 80;

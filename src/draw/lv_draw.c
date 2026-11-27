@@ -20,6 +20,10 @@
  *********************/
 #define _draw_info LV_GLOBAL_DEFAULT()->draw_info
 
+#if LV_USE_NEMA_GFX && LV_USE_DRAW_SW && !LV_DRAW_SW_SUPPORT_ARGB8888_PREMULTIPLIED
+    #error "LV_USE_NEMA_GFX needs LV_DRAW_SW_SUPPORT_ARGB8888_PREMULTIPLIED: its ARGB8888 layers are premultiplied"
+#endif
+
 /**********************
  *      TYPEDEFS
  **********************/
@@ -478,6 +482,12 @@ lv_layer_t * lv_draw_layer_create(lv_layer_t * parent_layer, lv_color_format_t c
         LV_PROFILER_DRAW_END;
         return NULL;
     }
+
+#if LV_USE_NEMA_GFX
+    /*NemaGFX draws premultiplied colors in a layer with an alpha channel: in a straight layer that content would be
+     *composed as C*A^2. The layer is premultiplied instead, and the software renderer writes in it premultiplied too*/
+    if(color_format == LV_COLOR_FORMAT_ARGB8888) color_format = LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED;
+#endif
 
     lv_draw_layer_init(new_layer, parent_layer, color_format, area);
 

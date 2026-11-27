@@ -82,8 +82,10 @@ void lv_draw_nema_gfx_line(lv_draw_task_t * t, const lv_draw_line_dsc_t * dsc)
     nema_bind_dst_tex((uintptr_t)NEMA_VIRT2PHYS(layer->draw_buf->data), lv_area_get_width(&(layer->buf_area)),
                       lv_area_get_height(&(layer->buf_area)), dst_nema_cf, stride);
 
+    /*Blended as the fills are: NEMA_BL_SIMPLE would multiply the alpha by itself too, writing Sa*Sa in a layer*/
     if(col32.alpha < 255U) {
-        nema_set_blend_fill(NEMA_BL_SIMPLE);
+        nema_set_blend_fill(NEMA_BL_SRC_OVER);
+        bg_color = nema_premultiply_rgba(bg_color);
     }
     else {
         nema_set_blend_fill(NEMA_BL_SRC);

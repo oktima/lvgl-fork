@@ -65,6 +65,7 @@ uint32_t lv_nemagfx_cf_to_nema(lv_color_format_t cf)
         case LV_COLOR_FORMAT_RGB888:
             return NEMA_BGR24;
         case LV_COLOR_FORMAT_ARGB8888:
+        case LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED:
             return NEMA_BGRA8888;
         case LV_COLOR_FORMAT_XRGB8888:
             return NEMA_BGRX8888;
@@ -92,8 +93,11 @@ uint32_t lv_nemagfx_blending_mode(lv_blend_mode_t lv_blend_mode)
 {
     uint32_t blending_mode;
     switch(lv_blend_mode) {
+        /*For a source with straight alpha. NEMA_BL_SIMPLE would give the right color on an opaque destination, but
+         *it multiplies the alpha by itself too: in a layer it would write Sa*Sa. Premultiplying the source and
+         *composing it with SRC_OVER gives the right color and alpha in both*/
         case LV_BLEND_MODE_NORMAL:
-            blending_mode = NEMA_BL_SIMPLE;
+            blending_mode = NEMA_BL_SRC_OVER | NEMA_BLOP_SRC_PREMULT;
             break;
         case LV_BLEND_MODE_ADDITIVE:
             blending_mode = NEMA_BL_ADD;
@@ -102,7 +106,7 @@ uint32_t lv_nemagfx_blending_mode(lv_blend_mode_t lv_blend_mode)
             blending_mode = nema_blending_mode(NEMA_BF_DESTCOLOR, NEMA_BF_INVSRCALPHA, NEMA_BLOP_SRC_PREMULT);
             break;
         default:
-            blending_mode = NEMA_BL_SIMPLE;
+            blending_mode = NEMA_BL_SRC_OVER | NEMA_BLOP_SRC_PREMULT;
             break;
     }
     return blending_mode;

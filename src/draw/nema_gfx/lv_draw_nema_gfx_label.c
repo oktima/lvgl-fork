@@ -293,14 +293,18 @@ static inline uint8_t _bpp_nema_gfx_format(lv_draw_glyph_dsc_t * glyph_draw_dsc)
 
 static inline void _set_color_blend(uint32_t color, uint8_t alpha)
 {
-    nema_set_tex_color(color);
-
+    /*The glyph texels carry straight alpha. NEMA_BL_SIMPLE would multiply that alpha by itself too, writing Sa*Sa in
+     *a layer: premultiplying the source and composing it with SRC_OVER gives the right color and alpha.
+     *NEMA_BLOP_SRC_PREMULT premultiplies by the alpha of the texel only, before NEMA_BLOP_MODULATE_A scales it by the
+     *opacity: the color of the texels takes the opacity here, premultiplied*/
     if(alpha < 255U) {
-        nema_set_blend_blit(NEMA_BL_SIMPLE | NEMA_BLOP_MODULATE_A);
+        nema_set_tex_color((nema_premultiply_rgba(color) & 0x00ffffffU) | 0xff000000U);
+        nema_set_blend_blit(NEMA_BL_SRC_OVER | NEMA_BLOP_SRC_PREMULT | NEMA_BLOP_MODULATE_A);
         nema_set_const_color(color);
     }
     else {
-        nema_set_blend_blit(NEMA_BL_SIMPLE);
+        nema_set_tex_color(color);
+        nema_set_blend_blit(NEMA_BL_SRC_OVER | NEMA_BLOP_SRC_PREMULT);
     }
 }
 

@@ -89,9 +89,27 @@ static void _draw_nema_gfx_img(lv_draw_task_t * t, const lv_draw_image_dsc_t * d
 
     const void * src_buf = decoded->data;
 
+    lv_color_format_t src_cf = header->cf;
+
+    bool alpha_only = src_cf == LV_COLOR_FORMAT_A1 || src_cf == LV_COLOR_FORMAT_A2 ||
+                      src_cf == LV_COLOR_FORMAT_A4 || src_cf == LV_COLOR_FORMAT_A8;
+
     uint32_t blending_mode = lv_nemagfx_blending_mode(dsc->blend_mode);
 
-    lv_color_format_t src_cf = header->cf;
+    /*A premultiplied source, such as a layer, already carries its alpha in the color: it is composed without
+     *premultiplying it again, and an opacity scales its color as well as its alpha*/
+    bool premultiplied = src_cf == LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED ||
+                         lv_draw_buf_has_flag(decoded, LV_IMAGE_FLAGS_PREMULTIPLIED);
+    if(premultiplied) {
+        blending_mode &= ~NEMA_BLOP_SRC_PREMULT;
+    }
+    /*NEMA_BLOP_SRC_PREMULT premultiplies by the alpha of the texel before NEMA_BLOP_MODULATE_A scales it by the
+     *opacity, and NEMA_BLOP_RECOLOR overrides it: a straight image drawn with an opacity or recolored keeps
+     *NEMA_BL_SIMPLE, right on an opaque destination only. An image with only alpha takes its color, premultiplied,
+     *from the texture mapping*/
+    else if(!alpha_only && dsc->blend_mode == LV_BLEND_MODE_NORMAL && (recolor || dsc->opa < 255)) {
+        blending_mode = NEMA_BL_SIMPLE;
+    }
 
     uint32_t src_nema_cf = lv_nemagfx_cf_to_nema(src_cf);
     /* the stride should be computed internally for NEMA_TSC images and images missing a stride value */
@@ -114,14 +132,14 @@ static void _draw_nema_gfx_img(lv_draw_task_t * t, const lv_draw_image_dsc_t * d
         blending_mode |= NEMA_BLOP_LUT;
     }
 
-    bool alpha_only = src_cf == LV_COLOR_FORMAT_A1 || src_cf == LV_COLOR_FORMAT_A2 ||
-                      src_cf == LV_COLOR_FORMAT_A4 || src_cf == LV_COLOR_FORMAT_A8;
     if(alpha_only) {
         /*An image with only alpha is drawn in its recolor, as the software renderer does. Its texels take the color
          *of the texture mapping, which the labels leave at the color of the last one drawn: without a recolor the
-         *image would take that color, and NEMA_BLOP_RECOLOR would mix it in whenever the recolor is not opaque*/
-        lv_color32_t col32 = lv_color_to_32(dsc->recolor, LV_OPA_COVER);
-        nema_set_tex_color(nema_rgba(col32.red, col32.green, col32.blue, 0xffU));
+         *image would take that color, and NEMA_BLOP_RECOLOR would mix it in whenever the recolor is not opaque.
+         *The opacity is premultiplied in the color: NEMA_BLOP_SRC_PREMULT premultiplies by the alpha of the texel
+         *only, before NEMA_BLOP_MODULATE_A scales it*/
+        lv_color_t color = lv_color_mix(dsc->recolor, lv_color_black(), dsc->opa);
+        nema_set_tex_color(nema_rgba(color.red, color.green, color.blue, 0xffU));
     }
     /*Guard for previous NemaGFX Version*/
 #ifdef NEMA_BLOP_RECOLOR
@@ -137,7 +155,9 @@ static void _draw_nema_gfx_img(lv_draw_task_t * t, const lv_draw_image_dsc_t * d
         uint32_t rgba = ((uint32_t)dsc->opa << 24U) | ((uint32_t)dsc->opa << 16U) | ((uint32_t)dsc->opa << 8U) | ((
                                                                                                                       uint32_t)dsc->opa);
         nema_set_const_color(rgba);
+        /*A premultiplied source needs its color modulated too*/
         blending_mode |= NEMA_BLOP_MODULATE_A;
+        if(premultiplied) blending_mode |= NEMA_BLOP_MODULATE_RGB;
     }
 
     if(!has_transform && masked && !recolor) {

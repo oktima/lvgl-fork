@@ -89,6 +89,9 @@ void lv_draw_sw_mask_rect(lv_draw_task_t * t, const lv_draw_mask_rect_dsc_t * ds
     uint32_t area_w = lv_area_get_width(&draw_area);
     lv_opa_t * mask_buf = lv_malloc(area_w);
 
+    /*A premultiplied layer carries its alpha in the color too, which the mask scales as well*/
+    bool premultiplied = target_layer->draw_buf->header.cf == LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED;
+
     int32_t y;
     for(y = draw_area.y1; y <= draw_area.y2; y++) {
         lv_memset(mask_buf, 0xff, area_w);
@@ -106,6 +109,11 @@ void lv_draw_sw_mask_rect(lv_draw_task_t * t, const lv_draw_mask_rect_dsc_t * ds
             for(i = 0; i < area_w; i++) {
                 if(mask_buf[i] != LV_OPA_COVER) {
                     c32_buf[i].alpha = LV_OPA_MIX2(c32_buf[i].alpha, mask_buf[i]);
+                    if(premultiplied) {
+                        c32_buf[i].red = LV_OPA_MIX2(c32_buf[i].red, mask_buf[i]);
+                        c32_buf[i].green = LV_OPA_MIX2(c32_buf[i].green, mask_buf[i]);
+                        c32_buf[i].blue = LV_OPA_MIX2(c32_buf[i].blue, mask_buf[i]);
+                    }
                 }
             }
         }

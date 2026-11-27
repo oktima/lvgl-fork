@@ -1067,11 +1067,19 @@ static bool apply_mask(const lv_draw_image_dsc_t * draw_dsc)
     int32_t h = lv_area_get_height(&masked_area);
     int32_t w = lv_area_get_width(&masked_area);
 
+    /*A premultiplied layer carries its alpha in the color too, which the mask scales as well*/
+    bool premultiplied = image_draw_buf->header.cf == LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED;
+
     int32_t y;
     for(y = 0; y < h; y++) {
         int32_t x;
         for(x = 0; x < w; x++) {
             img_start[x * 4 + 3] = LV_OPA_MIX2(mask_start[x], img_start[x * 4 + 3]);
+            if(premultiplied) {
+                img_start[x * 4 + 0] = LV_OPA_MIX2(mask_start[x], img_start[x * 4 + 0]);
+                img_start[x * 4 + 1] = LV_OPA_MIX2(mask_start[x], img_start[x * 4 + 1]);
+                img_start[x * 4 + 2] = LV_OPA_MIX2(mask_start[x], img_start[x * 4 + 2]);
+            }
         }
         img_start += layer_to_draw->draw_buf->header.stride;
         mask_start += mask_stride;
